@@ -1,0 +1,9 @@
+*~
+dist
+*.hi
+*.o
+*.log
+*.aux
+timetable-automn.tex
+timetable-spring.tex
+timetable.pdf
