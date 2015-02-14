@@ -1,6 +1,5 @@
 {-# LANGUAGE UnicodeSyntax #-}
 {-# LANGUAGE ParallelListComp #-}
-{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
 
@@ -34,6 +33,7 @@ module Timetable
        , renumber
        , defaultRules
        , runSolver
+       , isFixed
        )
        where
 import Control.Applicative
@@ -68,6 +68,7 @@ springSems = [B1A, B2A, B3A, B4A]
 autumnSems = [B1B, B2B, B3B]
 
 seasonOfSubject :: Subject -> Season
+seasonOfSubject (subjectNumber -> Right e) = seasonOfEntry e
 seasonOfSubject (target -> t)
   | elem t springSems = Spring
   | otherwise = Autumn
@@ -130,6 +131,30 @@ succSlot n = Just . toEnum . (1 +) . fromEnum $ n
 
 type Entry = (Year, Quater, DoW, Hour)
 
+targetOfEntry :: Entry -> Target
+targetOfEntry (y, q, _, _)
+  | y == Y1 && elem q [Q1, Q2] = B1A
+  | y == Y1 && elem q [Q3, Q4] = B1B
+  | y == Y2 && elem q [Q1, Q2] = B2A
+  | y == Y2 && elem q [Q3, Q4] = B2B
+  | y == Y3 && elem q [Q1, Q2] = B3A
+  | y == Y3 && elem q [Q3, Q4] = B3B
+  | y == Y4 && elem q [Q1, Q2] = B4A
+  | y == Y4 && elem q [Q3, Q4] = error "targetOfEntry : out of range"
+
+seasonOfEntry :: Entry -> Season
+seasonOfEntry (_, Q1, _, _) = Spring
+seasonOfEntry (_, Q2, _, _) = Spring
+seasonOfEntry (_, Q3, _, _) = Autumn
+seasonOfEntry (_, Q4, _, _) = Autumn
+
+slotOfEntry :: Entry -> Slot
+slotOfEntry (_, _, Mon, h) = [Mo1 ..] !! fromEnum h
+slotOfEntry (_, _, Tue, h) = [Tu1 ..] !! fromEnum h
+slotOfEntry (_, _, Wed, h) = [We1 ..] !! fromEnum h
+slotOfEntry (_, _, Thu, h) = [Th1 ..] !! fromEnum h
+slotOfEntry (_, _, Fri, h) = [Fr1 ..] !! fromEnum h
+
 data Subject = Subject
                {
                  labelOf :: String -- ^ 科目名
@@ -140,27 +165,43 @@ data Subject = Subject
                , preqsOf :: [String]     -- ^ 履修条件
                , sameWith :: [String]    -- ^ 同時開講科目
                , atComputerRoom :: Bool    -- ^ 演習室使用
-               , subjectNumber :: Int
+               , subjectNumber :: Either Int (Entry)
                }
                deriving (Eq, Ord, Show)
 
+isFixed :: Subject -> Bool
+isFixed (subjectNumber -> Left _) = False
+isFixed (subjectNumber -> Right _) = True
+
 type TimeTable = [(Entry, Subject)]
 
-data Sub = Sub String Target Bool [String] (Maybe Int) [String] [String] Bool
+data Sub
+  = Sub    String Target         Bool [String] (Maybe Int) [String] [String] Bool
+  | Fixed  String Entry          Bool [String] (Maybe Int) [String] [String] Bool
+  | FixedQ String (Year, Quater) Bool [String] (Maybe Int) [String] [String] Bool
 
 canonize :: [Sub] -> [Subject]
 canonize = renumber . concatMap unfoldSubject
 
 renumber :: [Subject] -> [Subject]
-renumber l = zipWith (\sub nu -> sub { subjectNumber = nu }) l [0 :: Int ..]
+renumber l = loop l 1
+  where
+    loop [] _                         = []
+    loop (sub@(isFixed -> True):l)  n = sub                            : loop l n
+    loop (sub@(isFixed -> False):l) n = sub { subjectNumber = Left n } : loop l (n + 1)
 
 unfoldSubject :: Sub -> [Subject]
+unfoldSubject sub@(Fixed la en re ls is pr sa at) = [Subject la (targetOfEntry en) re ls is pr sa at (Right en)]
 unfoldSubject sub@(Sub la ta re ls is pr sa at)
-  | lc == '\'' = [Subject namep ta re ls is pr sa at 0, Subject nameq ta re ls is pr [namep] at 0]    -- 科目名が'で終わると同時開講
-  | lc == '+'  = [Subject name1 ta re ls is pr sa at 0, Subject name2 ta re ls is [name1] sa at 0]    -- 科目名が*で終わると2クォーター開講
-  | lc == '?'  = [Subject name  ta re ls is pr sa at 0, Subject (name ++ "?") ta re ls is pr sa at 0] -- 科目名が?で終わると2コマ必要
-  | otherwise  = [Subject la ta re ls is pr sa at 0]
+  -- 科目名が'で終わると同時開講
+  | lc == '\''  = [Subject namep ta re ls is pr sa at z, Subject nameq ta re ls is pr [namep] at z]
+  -- 科目名が*で終わると2クォーター開講
+  | lc == '+'   = [Subject name1 ta re ls is pr sa at z, Subject name2 ta re ls is [name1] sa at z]
+  -- 科目名が?で終わると2コマ必要
+  | lc == '?'   = [Subject name  ta re ls is pr sa at z, Subject (name ++ "?") ta re ls is pr sa at z]
+  | otherwise   = [Subject la ta re ls is pr sa at z]
     where
+      z = Left 0
       name1 = init la ++ "→"
       name2 = "→" ++ init la
       namep = init la ++ "'"
@@ -171,21 +212,17 @@ unfoldSubject sub@(Sub la ta re ls is pr sa at)
 bundleSize :: Int
 bundleSize = 1 + length (allItems :: [Slot]) -- 1 bit for quater
 
-indexOf :: [Subject] -> Subject -> Int
-indexOf l x = loop l 0
-  where
-    loop [] n = error $ "indexOf: can't find " ++ show x
-    loop (y:l) n = if x == y then n else loop l $ n + 1
-
 varsForDoubleQuater :: Subject -> (Int, Int)
-varsForDoubleQuater s = (base + 1, base + 1)
+varsForDoubleQuater s@(subjectNumber -> Right _) = error "varsForDoubleQuater"
+varsForDoubleQuater s@(subjectNumber -> Left n) = (base + 1, base + 1)
   where
-    base = subjectNumber s * bundleSize
+    base = (n - 1) * bundleSize
 
 varsForSlot :: Subject -> (Int, Int)
-varsForSlot s = (base + 1, base + length (allItems :: [Slot]))
+varsForSlot s@(subjectNumber -> Right _) = error "varsForSlot"
+varsForSlot s@(subjectNumber -> Left n) = (base + 1, base + length (allItems :: [Slot]))
   where
-    base = subjectNumber s * bundleSize + 1
+    base = (n -1) * bundleSize + 1
 
 rangeOver :: (Int, Int) -> [Int]
 rangeOver (a, b) = [a .. b]
@@ -199,7 +236,8 @@ fromName subjects l
   | otherwise = error ""
 
 on :: Int -> Subject -> Int
-on n s = 1 + subjectNumber s * bundleSize + mod (n - 1) bundleSize
+on n s@(subjectNumber -> Right _) = error "on"
+on n s@(subjectNumber -> Left n') = 1 + (n' - 1) * bundleSize + mod (n - 1) bundleSize
 
 interpretationOf :: [Subject] -> Int -> (Subject, String, Bool)
 interpretationOf subs x = (sub, kind, 0 < x)
@@ -215,11 +253,12 @@ interpretationOf subs x = (sub, kind, 0 < x)
             else show (toEnum (pos - numQ) :: Slot)
 
 interprete :: [Int] -> Subject -> (Quater, Slot)
+interprete l s@(subjectNumber -> Right e@(_, q, _, _)) = (q, slotOfEntry e)
 interprete l s
   | s' == [] = error $ "no assignment to " ++ labelOf s
   | length s' == 1 = case q' of
     [] | elem (target s) springSems    -> (Q1, head s')
-    [] | elem (target s) autumnSems    -> (Q3,  head s')
+    [] | elem (target s) autumnSems    -> (Q3, head s')
     (x:_) | elem (target s) springSems -> (Q2, head s')
     (x:_) | elem (target s) autumnSems -> (Q4, head s')
   | otherwise = error $ "strange assignment: " ++ show (labelOf s , (q', s'))
@@ -272,169 +311,195 @@ s1 <!> s2 = (-&&&-) [ (q -!- (q `on` s2)) -|- neg s -|- neg (s `on` s2)
 --------------------------------------------------------------------------------
 
 -- | 講師は同一時間帯は持てない
-rest1 :: [Subject] -> TimeTable -> BoolForm
-rest1 subs fixed = (-&&&-) [ sub' <!> sub
-                     | sub <- subs
-                     , lecturer <- lecturersOf sub
-                     , sub' <- filter (elem lecturer . lecturersOf) subs
-                     , sub < sub'
-                     ]
-              -&-
-              (-&&&-) [ neg s    -- 1年科目との整合性
-                      | sub <- subs
-                      , lect <- lecturersOf sub
-                      , ((_, _, dow, num), sub') <- filter (elem lect . lecturersOf . snd) $ fixed
-                      , (target sub' == B1A && elem (target sub) springSems) || (target sub' == B1B && elem (target sub) autumnSems)
-                      , s <- varsForSlot `over` sub
-                      , asSlot s == Just (toSlot dow num)
-                      ]
+rest1 :: [Subject] -> BoolForm
+rest1 ss = (-&&&-) [ sub' <!> sub
+                   | sub <- subs
+                   , lecturer <- lecturersOf sub
+                   , sub' <- filter (elem lecturer . lecturersOf) subs
+                   , sub < sub'
+                   ]
+           -&-                  -- 固定科目との整合性
+           (-&&&-) [ neg q -|- neg s
+                   | sub <- subs
+                   , lect <- lecturersOf sub
+                   , sub'@(subjectNumber -> Right (_, qu, dow, num)) <- filter (elem lect . lecturersOf) fixed
+                   , q <- varsForDoubleQuater `over` sub
+                   , asDoubleQuater q == Just (if elem qu [Q1, Q3] then DQ1 else DQ2)
+                   , s <- varsForSlot `over` sub
+                   , asSlot s == Just (toSlot dow num)
+                   ]
+  where
+    fixed = filter isFixed ss
+    subs  = filter (not . isFixed) ss
 
 -- | 固定科目は同一学年の全科目割当て不可
-rest2 :: [Subject] -> TimeTable -> BoolForm
-rest2 subs fixed = (-&&&-) [ (if elem q' [Q1, Q3] then toBF q else neg q) -|- neg s
-                            | sub <- subs
-                            , (y', q', d', h') <- map fst fixed
-                            , seasonOfSubject sub == seasonOf q'
-                            , yearOfSubject sub == y'
-                            , q <- varsForDoubleQuater `over` sub
-                            , s <- varsForSlot `over` sub
-                            , (dowOf <$> asSlot s) == Just d'
-                            , (hourOf <$> asSlot s) == Just h'
-                            ]
+rest2 :: [Subject] -> BoolForm
+rest2 ss = (-&&&-) [ (if elem q' [Q1, Q3] then toBF q else neg q) -|- neg s
+                   | sub <- subs
+                   , (y', q', d', h') <- map (\(subjectNumber -> Right e) -> e) fixed
+                   , seasonOfSubject sub == seasonOf q'
+                   , yearOfSubject sub == y'
+                   , q <- varsForDoubleQuater `over` sub
+                   , s <- varsForSlot `over` sub
+                   , (dowOf <$> asSlot s) == Just d'
+                   , (hourOf <$> asSlot s) == Just h'
+                   ]
+  where
+    fixed = filter isFixed ss
+    subs  = filter (not . isFixed) ss
 
 -- | 第2学年は月火がだめ、第4学年は月がだめ
-cond1 subs = (-&&&-) [ neg s
-                     | sub <- subs
-                     , elem (target sub) [B2A, B2B]
-                     , s <- varsForSlot `over` sub
-                     , elem (asSlot s) [Just s | s <- [Mo1 .. Tu5]]
-                     ]
-             -&-
-             (-&&&-) [ neg s -&- neg q
-                     | sub <- subs
-                     , elem (target sub) [B4A]
-                     , q <- varsForDoubleQuater `over` sub
-                     , s <- varsForSlot `over` sub
-                     , elem (asSlot s) [Just s | s <- [Mo1 .. Mo5]]
-                     ]
+cond1 ss = (-&&&-) [ neg s
+                   | sub <- subs
+                   , elem (target sub) [B2A, B2B]
+                   , s <- varsForSlot `over` sub
+                   , elem (asSlot s) [Just s | s <- [Mo1 .. Tu5]]
+                   ]
+           -&-
+           (-&&&-) [ neg s -&- neg q
+                   | sub <- subs
+                   , elem (target sub) [B4A]
+                   , q <- varsForDoubleQuater `over` sub
+                   , s <- varsForSlot `over` sub
+                   , elem (asSlot s) [Just s | s <- [Mo1 .. Mo5]]
+                   ]
+  where
+    subs  = filter (not . isFixed) ss
 
 -- | 全てのSubjectの割当ては単一であること
-cond2 subs = (-&&&-) [ neg s1 -|- neg s2
-                     | sub <- subs
-                     , s1 <- varsForSlot `over` sub
-                     , s2 <- varsForSlot `over` sub
-                     , s1 < s2
-                     ]
-             -&-
-             (-&&&-)[ (-|||-) [ toBF s | s <- varsForSlot `over` sub] | sub <- subs ]
+cond2 ss = (-&&&-) [ neg s1 -|- neg s2
+                   | sub <- subs
+                   , s1 <- varsForSlot `over` sub
+                   , s2 <- varsForSlot `over` sub
+                   , s1 < s2
+                   ]
+           -&-
+           (-&&&-)[ (-|||-) [ toBF s | s <- varsForSlot `over` sub] | sub <- subs ]
+  where
+    subs  = filter (not . isFixed) ss
 
 -- | 同学年内では同じ割当てが2回出現することはない
-cond3 subs = (-&&&-) [ sub <!> sub'
-                     | sub  <- subs
-                     , sub' <- subs
-                     , target sub == target sub'
-                     , sub < sub'
-                     ]
+cond3 ss = (-&&&-) [ sub <!> sub'
+                   | sub  <- subs
+                   , sub' <- subs
+                   , target sub == target sub'
+                   , sub < sub'
+                   ]
+  where
+    subs  = filter (not . isFixed) ss
 
 -- | nコマの科目は次の連続する(n-1)コマが存在するコマでなければならない
-cond4 subs = (-&&&-) [ neg s
-                     | sub <- filter ((Nothing /=) . isLong) subs
-                     , s <- varsForSlot `over` sub
-                     , case isLong sub of
-                         Just 2 -> (succSlot =<< asSlot s) == Nothing
-                         Just 3 -> (succSlot =<< succSlot =<< asSlot s) == Nothing
-                         _ -> False
-                     ]
+cond4 ss = (-&&&-) [ neg s
+                   | sub <- filter ((Nothing /=) . isLong) subs
+                   , s <- varsForSlot `over` sub
+                   , case isLong sub of
+                     Just 2 -> (succSlot =<< asSlot s) == Nothing
+                     Just 3 -> (succSlot =<< succSlot =<< asSlot s) == Nothing
+                     _ -> False
+                   ]
+  where
+    subs  = filter (not . isFixed) ss
 
 -- | nコマの科目はそれらのコマにも同学年の他の科目が入ってはいけない
-cond5 subs = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
-                     | sub <- filter ((Nothing /=) . isLong) subs
-                     , q <- varsForDoubleQuater `over` sub
-                     , s <- varsForSlot `over` sub
-                     , sub' <- subs
-                     , target sub == target sub'
-                     , sub /= sub'
-                     , s' <- varsForSlot `over` sub'
-                     , (succSlot =<< asSlot s) /= Nothing
-                     , case isLong sub of
-                         Just 2 -> asSlot s' == (succSlot =<< asSlot s)
-                         Just 3 -> asSlot s' == (succSlot =<< asSlot s) || asSlot s' == (succSlot =<< succSlot =<< asSlot s)
-                         _ -> False
+cond5 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
+                   | sub <- filter ((Nothing /=) . isLong) subs
+                   , q <- varsForDoubleQuater `over` sub
+                   , s <- varsForSlot `over` sub
+                   , sub' <- subs
+                   , target sub == target sub'
+                   , sub /= sub'
+                   , s' <- varsForSlot `over` sub'
+                   , (succSlot =<< asSlot s) /= Nothing
+                   , case isLong sub of
+                     Just 2 -> asSlot s' == (succSlot =<< asSlot s)
+                     Just 3 -> asSlot s' == (succSlot =<< asSlot s) || asSlot s' == (succSlot =<< succSlot =<< asSlot s)
+                     _ -> False
                      ]
+  where
+    subs  = filter (not . isFixed) ss
 
 -- | 前件科目のチェック
-cond6 subs = (-&&&-) [ neg q' -&- q
-                     | sub <- filter (([] /=) . preqsOf) subs
-                     , sub' <- map (fromName subs) (preqsOf sub)
-                     , q <- varsForDoubleQuater `over` sub
-                     , q' <- varsForDoubleQuater `over` sub'
-                     -- , Just True == ((<=) <$> asDoubleQuater q <*> asDoubleQuater q')
-                     ]
-             -- →を除いた名前が同一の科目対は同校時開講であること
-             -&-
-             (-&&&-) [ s -=- (s `on` sub')
-                     | sub <- filter (([] /=) . preqsOf) subs
-                     , sub' <- map (fromName subs) (preqsOf sub)
-                     , delete '→' (labelOf sub) == delete '→' (labelOf sub)
-                     , s <- varsForSlot `over` sub
-                     ]
+cond6 ss = (-&&&-) [ neg q' -&- q
+                   | sub <- filter (([] /=) . preqsOf) subs
+                   , sub' <- map (fromName subs) (preqsOf sub)
+                   , q <- varsForDoubleQuater `over` sub
+                   , q' <- varsForDoubleQuater `over` sub'
+                   -- , Just True == ((<=) <$> asDoubleQuater q <*> asDoubleQuater q')
+                   ]
+           -&-                  -- →を除いた名前が同一の科目対は同校時開講であること
+           (-&&&-) [ s -=- (s `on` sub')
+                   | sub <- filter (([] /=) . preqsOf) subs
+                   , sub' <- map (fromName subs) (preqsOf sub)
+                   , delete '→' (labelOf sub) == delete '→' (labelOf sub)
+                   , s <- varsForSlot `over` sub
+                   ]
+  where
+    subs  = filter (not . isFixed) ss
 
 -- | 同時開講科目のチェック
-cond7 subs = (-&&&-) [ q -=- (q `on` sub')
-                     | sub <- filter (([] /=) . sameWith) subs
-                     , sub' <- map (fromName subs) (sameWith sub)
-                     , sub /= sub'
-                     , q <- varsForDoubleQuater `over` sub
-                     ]
+cond7 ss = (-&&&-) [ q -=- (q `on` sub')
+                   | sub <- filter (([] /=) . sameWith) subs
+                   , sub' <- map (fromName subs) (sameWith sub)
+                   , sub /= sub'
+                   , q <- varsForDoubleQuater `over` sub
+                   ]
+  where
+    subs  = filter (not . isFixed) ss
 
 -- | 演習室はひとつしかない
-cond8 subs = (-&&&-) [ sub' <!> sub
-                     | sub <- filter atComputerRoom subs
-                     , sub' <- filter atComputerRoom subs
-                     , sub' < sub
-                     ]
-             -&-                -- nコマ連続科目の処理
-             (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
-                     | sub <- filter atComputerRoom subs
-                     , Nothing /= isLong sub
-                     , q <- varsForDoubleQuater `over` sub
-                     , s <- varsForSlot `over` sub
-                     , sub' <- filter atComputerRoom subs
-                     , sub' /= sub
-                     , s' <- varsForSlot `over` sub'
-                     , (succSlot =<< asSlot s) /= Nothing
-                     , case isLong sub of
-                         Just 2 -> asSlot s' == (succSlot =<< asSlot s)
-                         Just 3 -> asSlot s' == (succSlot =<< asSlot s) || asSlot s' == (succSlot =<< succSlot =<< asSlot s)
-                         _ -> False
-                     ]
+cond8 ss = (-&&&-) [ sub' <!> sub
+                   | sub <- filter atComputerRoom subs
+                   , sub' <- filter atComputerRoom subs
+                   , sub' < sub
+                   ]
+           -&-                -- nコマ連続科目の処理
+           (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
+                   | sub <- filter atComputerRoom subs
+                   , Nothing /= isLong sub
+                   , q <- varsForDoubleQuater `over` sub
+                   , s <- varsForSlot `over` sub
+                   , sub' <- filter atComputerRoom subs
+                   , sub' /= sub
+                   , s' <- varsForSlot `over` sub'
+                   , (succSlot =<< asSlot s) /= Nothing
+                   , case isLong sub of
+                     Just 2 -> asSlot s' == (succSlot =<< asSlot s)
+                     Just 3 -> asSlot s' == (succSlot =<< asSlot s) || asSlot s' == (succSlot =<< succSlot =<< asSlot s)
+                     _ -> False
+                   ]
+  where
+    subs  = filter (not . isFixed) ss
 
 -- | 3,4年の講義に関しては講師は1日に2つ講義を持たない
-cond9 subs = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
-                      | sub <- subs
-                      , elem (target sub) [B2A ..]
-                      , lecturer <- lecturersOf sub
-                      , sub' <- subs
-                      , elem (target sub') [B2A ..]
-                      , sub < sub'
-                      , elem lecturer (lecturersOf sub')
-                      , q <- varsForDoubleQuater `over` sub
-                      , s <- varsForSlot `over` sub
-                      , s' <- varsForSlot `over` sub'
-                      , asDoW s == asDoW s'
-                      ]
+cond9 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
+                   | sub <- subs
+                   , elem (target sub) [B2A ..]
+                   , lecturer <- lecturersOf sub
+                   , sub' <- subs
+                   , elem (target sub') [B2A ..]
+                   , sub < sub'
+                   , elem lecturer (lecturersOf sub')
+                   , q <- varsForDoubleQuater `over` sub
+                   , s <- varsForSlot `over` sub
+                   , s' <- varsForSlot `over` sub'
+                   , asDoW s == asDoW s'
+                   ]
+  where
+    subs  = filter (not . isFixed) ss
 
 -- | 第3学年DQ2に必修はいれない
-cond10 subs = (-&&&-) [ neg q
-                     | sub <- filter required subs
-                     , target sub == B3A
-                     , q <- varsForDoubleQuater `over` sub
-                     -- , s <- varsForSlot `over` sub
-                     -- , elem (asDoubleQuater q, asSlot s) [(Just DQ2, Just s) | s <- allItems]
-                     ]
+cond10 ss = (-&&&-) [ neg q
+                    | sub <- filter required subs
+                    , target sub == B3A
+                    , q <- varsForDoubleQuater `over` sub
+                    -- , s <- varsForSlot `over` sub
+                    -- , elem (asDoubleQuater q, asSlot s) [(Just DQ2, Just s) | s <- allItems]
+                    ]
+  where
+    subs  = filter (not . isFixed) ss
 
-defaultRules :: ([([Subject] -> TimeTable -> BoolForm)], [([Subject] -> BoolForm)])
-defaultRules = ([rest1, rest2], [cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8, cond9])
+defaultRules :: [[Subject] -> BoolForm]
+defaultRules = [rest1, rest2, cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8, cond9]
 
 checkConsistenry subjects
   | [] /= invalidPreqs = error $ "`preqs` contains non-existing subject: " ++ head invalidPreqs
@@ -462,14 +527,19 @@ splitBySeason subs = (
   , renumber $ filter ((flip elem autumnSems) . target) subs
   )
 
-runSolver :: ([Subject] -> BoolForm) -> TimeTable -> [Subject] -> IO ()
-runSolver mkrule fixed subjects = do
-  let (subjectsInSpring, subjectsInAutomn) = splitBySeason subjects
+runSolver :: ([Subject] -> BoolForm) -> [Subject] -> IO ()
+runSolver mkrule subjects = do
   os <- getArgs
+  let (subjectsInSpring, subjectsInAutomn) = splitBySeason subjects
   unless (checkConsistenry subjectsInSpring) $ error "exit"
   unless (checkConsistenry subjectsInAutomn) $ error "exit"
   let (r1, r2) = (mkrule subjectsInSpring, mkrule subjectsInAutomn)
-  let printer subs ans = do
+  let
+    seasonIs s (subjectNumber -> Right e) = seasonOfEntry e == s
+    seasonIs _ _ = error "seasonIs"
+  let
+    printer :: [Subject] -> [Int] -> IO ()
+    printer subs ans = do
         let x = filter (0 <) . (take (length subs * bundleSize)) $ ans
         let comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
         let l = sortBy comp $ map (\s -> (interprete x s, s)) subs
@@ -482,29 +552,33 @@ runSolver mkrule fixed subjects = do
           forM_ yl $ \((q, r), s) -> do
             putStr $ printf "%s %s: %-24s" (show q) (show r) (labelOf s)
             putStrLn . ("\t" ++) . intercalate ", " $ lecturersOf s
-  let makeTable season fixed subs ans = do
+  let
+    makeTable :: Season -> [Subject] -> [Int] -> IO ()
+    makeTable season subs ans = do
         let x = filter (0 <) . (take (length subs * bundleSize)) $ ans
         let comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
         let l = sortBy comp $ map (\s -> (interprete x s, s)) subs
+        let fixed = tableOfFixed $ filter (seasonIs season) $ filter isFixed subjects
         let table = fixed ++ (flip map l $ \((q, slot), subject) -> ((yearOfSubject subject, q, dowOf slot, hourOf slot), subject))
         let h = if season == Spring then "timetable-spring.tex" else "timetable-automn.tex"
         -- toLatexTable p table
         withFile h WriteMode $ toLatex season table
   case os of
+    ("-i":_) | elem "B" os -> do
+      printer subjectsInAutomn . read =<< getContents
     ("-i":_) -> do
-      printer (if elem "B" os then subjectsInAutomn else subjectsInSpring) . read =<< getContents
+      printer subjectsInSpring . read =<< getContents
     ("-d":_) -> do
       putStrLn . asCNFString $ if elem "B" os then r2 else r1
     _ -> do
       let anss = map (SAT.satisfiable (:) . asList) [r1, r2]
-      let fxs = [filter ((B1A ==) . target . snd) fixed, filter ((B1B ==) . target . snd) fixed]
-      forM_ (zip4 [Spring, Autumn] fxs anss [subjectsInSpring, subjectsInAutomn]) $ \(season, fixed, res, subs) -> do
+      forM_ (zip3 [Spring, Autumn] anss [subjectsInSpring, subjectsInAutomn]) $ \(season, res, subs) -> do
         putStr $ "-------- " ++ if season == Spring then "春学期" else "秋学期"
         let bf = if season == Spring then r1 else r2
         putStrLn $ "; " ++ show (numberOfVariables bf, numberOfClauses bf)
         case res of
           [] -> putStrLn "can't solve"
-          (r:_) -> printer subs r >> makeTable (season :: Season) fixed subs r
+          (r:_) -> printer subs r >> makeTable (season :: Season) subs r
 
 toLatex :: Season -> TimeTable -> Handle -> IO ()
 toLatex season table h = do
@@ -590,3 +664,5 @@ currentTimeString = do
   t <- utcToLocalTime <$> (getTimeZone =<< getCurrentTime) <*> getCurrentTime
   return $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" t
 
+tableOfFixed :: [Subject] -> TimeTable
+tableOfFixed l = map (\s@(subjectNumber -> Right e) -> (e, s)) $ filter isFixed l
