@@ -369,6 +369,14 @@ cond6 subs = (-&&&-) [ neg q' -&- q
                      , q' <- varsForDoubleQuater `over` sub'
                      -- , Just True == ((<=) <$> asDoubleQuater q <*> asDoubleQuater q')
                      ]
+             -- →を除いた名前が同一の科目対は同校時開講であること
+             -&-
+             (-&&&-) [ s -=- (s `on` sub')
+                     | sub <- filter (([] /=) . preqsOf) subs
+                     , sub' <- map (fromName subs) (preqsOf sub)
+                     , delete '→' (labelOf sub) == delete '→' (labelOf sub)
+                     , s <- varsForSlot `over` sub
+                     ]
 
 -- | 同時開講科目のチェック
 cond7 subs = (-&&&-) [ q -=- (q `on` sub')
