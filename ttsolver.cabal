@@ -2,7 +2,7 @@
 -- see http://haskell.org/cabal/users-guide/
 
 name:                ttsolver
-version:             0.1.1.0
+version:             0.1.2.0
 synopsis:           SAT-based timetable generator
 description:      This is a private project
 license:             GPL-3
@@ -20,7 +20,7 @@ library
   exposed-modules:     Timetable
   -- other-modules:       
   other-extensions:    UnicodeSyntax, ParallelListComp, RankNTypes, ViewPatterns, OverloadedStrings, RecordWildCards
-  build-depends:       base >=4.8 && <4.9, CNFIO >=0.2 && <0.3, sih >=4.0 && <4.1
+  build-depends:       base >=4.8 && <4.9, CNFIO >=0.2 && <0.3, sih >=4.0 && <4.1, time >= 1.5
   hs-source-dirs:      src
   default-language:    Haskell2010
 
@@ -30,4 +30,4 @@ executable maketimetable
   -- other-modules:
   ghc-options:	-H40m
   default-language:	Haskell2010
-  build-depends:       base >=4.8 && <4.9, CNFIO >=0.2 && <0.3, sih >=4.0 && <4.1
+  build-depends:       base >=4.8 && <4.9, CNFIO >=0.2 && <0.3, sih >=4.0 && <4.1, time >= 1.5

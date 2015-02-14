@@ -39,6 +39,7 @@ module Timetable
 import Control.Applicative
 import Control.Monad
 import Data.List
+import Data.Time
 import System.Environment
 import System.IO
 import Text.Printf
@@ -507,6 +508,7 @@ runSolver mkrule fixed subjects = do
 
 toLatex :: Season -> TimeTable -> Handle -> IO ()
 toLatex season table h = do
+  when (season == Spring) (hPutStrLn h . printf "\\newcommand{\\versionID}{%s}" =<< currentTimeString)
   forM_ tags $ \(k@(_, q, _, _), s) -> do
     let dq = if elem q [Q1, Q3] then DQ1 else DQ2
     case find ((k ==) . fst) table of
@@ -582,3 +584,9 @@ toLatexTable p _ = do
           putStr ((printf "\\%s%s%s%s%sSub&" p (show y) (show q) (show d) (show s)) :: String)
           putStr ((printf "\\%s%s%s%s%sLec" p (show y) (show q) (show d) (show s)) :: String)
           if q == maxBound && y == Y1 then putStrLn "\\\\\\hline" else putStr "&"
+
+currentTimeString :: IO String
+currentTimeString = do
+  t <- utcToLocalTime <$> (getTimeZone =<< getCurrentTime) <*> getCurrentTime
+  return $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" t
+
