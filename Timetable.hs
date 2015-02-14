@@ -477,8 +477,8 @@ defaultRules :: ([([Subject] -> TimeTable -> BoolForm)], [([Subject] -> BoolForm
 defaultRules = ([cond0], [cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8, cond9])
 
 checkConsistenry subjects
-  | [] /= preqs \\ labels = error $ "`preqs` contains non-existing subject: " ++ show (preqs, labels)
-  | [] /= sames \\ labels = error $ "`same` contains non-existing subject: " ++ show (sames, labels)
+  | [] /= invalidPreqs = error $ "`preqs` contains non-existing subject: " ++ head invalidPreqs
+  | [] /= invalidSames = error $ "`same` contains non-existing subject: " ++ head invalidSames
   | any ([] ==) (map lecturersOf subjects) = error $ "subject without lecturer: " ++ show (filter (([] ==) . lecturersOf) subjects)
   | [] /= out1 = error $ "春学期内で順序が閉じてない: " ++ head out1
   | [] /= out2 = error $ "秋学期内で順序が閉じてない: " ++ head out2
@@ -487,7 +487,9 @@ checkConsistenry subjects
   where
     labels = sort $ map labelOf subjects
     preqs = sort $ nub $ concatMap preqsOf subjects
+    invalidPreqs = preqs \\ labels
     sames = sort $ nub $ concatMap sameWith subjects
+    invalidSames = sames \\ labels
     subAs = filter (flip elem springSems . target) subjects
     subBs = filter (flip elem autumnSems . target) subjects
     out1 = (nub $ concatMap preqsOf subAs) \\ map labelOf subAs
