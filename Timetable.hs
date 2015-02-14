@@ -162,18 +162,6 @@ unfoldSubject sub@(Sub la ta re ls is pr sa at)
       name = init la
       lc = last la
 
-{-
-instance Bounded Subject where
-  minBound = head subjects
-  maxBound = last subjects
-
-instance Enum Subject where
-  succ = toEnum . succ . fromEnum
-  pred = toEnum . pred . fromEnum
-  toEnum n = subjects !! n
-  fromEnum s = length $ takeWhile (/= s) subjects 
--}
-
 bundleSize :: Int
 bundleSize = 1 + length (allItems :: [Slot]) -- 1 bit for quater
 
