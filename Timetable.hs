@@ -527,8 +527,8 @@ splitBySeason subs = (
   , renumber $ filter ((flip elem autumnSems) . target) subs
   )
 
-runSolver :: ([Subject] -> BoolForm) -> [Subject] -> IO ()
-runSolver mkrule subjects = do
+runSolver :: String -> ([Subject] -> BoolForm) -> [Subject] -> IO ()
+runSolver dataName mkrule subjects = do
   os <- getArgs
   let (subjectsInSpring, subjectsInAutomn) = splitBySeason subjects
   unless (checkConsistenry subjectsInSpring) $ error "exit"
@@ -562,7 +562,7 @@ runSolver mkrule subjects = do
         let table = fixed ++ (flip map l $ \((q, slot), subject) -> ((yearOfSubject subject, q, dowOf slot, hourOf slot), subject))
         let h = if season == Spring then "timetable-spring.tex" else "timetable-automn.tex"
         -- toLatexTable p table
-        withFile h WriteMode $ toLatex season table
+        withFile h WriteMode $ toLatex dataName season table
   case os of
     ("-i":_) | elem "B" os -> do
       printer subjectsInAutomn . read =<< getContents
@@ -580,9 +580,9 @@ runSolver mkrule subjects = do
           [] -> putStrLn "can't solve"
           (r:_) -> printer subs r >> makeTable (season :: Season) subs r
 
-toLatex :: Season -> TimeTable -> Handle -> IO ()
-toLatex season table h = do
-  when (season == Spring) (hPutStrLn h . printf "\\newcommand{\\versionID}{%s}" =<< currentTimeString)
+toLatex :: String -> Season -> TimeTable -> Handle -> IO ()
+toLatex dataName season table h = do
+  when (season == Spring) (hPutStrLn h . printf "\\newcommand{\\versionID}{%s (%s)}" dataName =<< currentTimeString)
   forM_ tags $ \(k@(_, q, _, _), s) -> do
     let dq = if elem q [Q1, Q3] then DQ1 else DQ2
     case find ((k ==) . fst) table of

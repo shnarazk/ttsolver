@@ -18,4 +18,4 @@ makerule x = (-&&&-) $ map ($ x) defaultRules
 
 main = do
   putStrLn "running ..."
-  runSolver makerule subjects
+  runSolver "sample data" makerule subjects
