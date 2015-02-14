@@ -19,7 +19,7 @@ module Timetable
        , Slot (..)
        , varsForSlot
        , varsForDoubleQuater
-       , yearOf
+       , yearOfSubject
        , hourOf
        , dowOf
        , toSlot
@@ -66,6 +66,11 @@ data Target = B1A | B1B | B2A | B2B | B3A | B3B | B4A
 springSems = [B1A, B2A, B3A, B4A]
 autumnSems = [B1B, B2B, B3B]
 
+seasonOfSubject :: Subject -> Season
+seasonOfSubject (target -> t)
+  | elem t springSems = Spring
+  | otherwise = Autumn
+
 data Slot = Mo1 | Mo2 | Mo3 | Mo4 | Mo5
           | Tu1 | Tu2 | Tu3 | Tu4 | Tu5
           | We1 | We2 | We3 | We4 -- We5
@@ -73,8 +78,8 @@ data Slot = Mo1 | Mo2 | Mo3 | Mo4 | Mo5
           | Fr1 | Fr2 | Fr3 | Fr4
           deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
-yearOf :: Subject -> Year
-yearOf (target -> y)
+yearOfSubject :: Subject -> Year
+yearOfSubject (target -> y)
   | elem y [B1A, B1B] = Y1
   | elem y [B2A, B2B] = Y2
   | elem y [B3A, B3B] = Y3
@@ -175,7 +180,7 @@ varsForDoubleQuater :: Subject -> (Int, Int)
 varsForDoubleQuater s = (base + 1, base + 1)
   where
     base = subjectNumber s * bundleSize
-   
+
 varsForSlot :: Subject -> (Int, Int)
 varsForSlot s = (base + 1, base + length (allItems :: [Slot]))
   where
@@ -210,7 +215,7 @@ interpretationOf subs x = (sub, kind, 0 < x)
 
 interprete :: [Int] -> Subject -> (Quater, Slot)
 interprete l s
-  | s' == [] = error $ "no assignment to " ++ labelOf s 
+  | s' == [] = error $ "no assignment to " ++ labelOf s
   | length s' == 1 = case q' of
     [] | elem (target s) springSems    -> (Q1, head s')
     [] | elem (target s) autumnSems    -> (Q3,  head s')
@@ -266,7 +271,8 @@ s1 <!> s2 = (-&&&-) [ (q -!- (q `on` s2)) -|- neg s -|- neg (s `on` s2)
 --------------------------------------------------------------------------------
 
 -- | 講師は同一時間帯は持てない
-cond0 subs fixed = (-&&&-) [ sub' <!> sub
+rest1 :: [Subject] -> TimeTable -> BoolForm
+rest1 subs fixed = (-&&&-) [ sub' <!> sub
                      | sub <- subs
                      , lecturer <- lecturersOf sub
                      , sub' <- filter (elem lecturer . lecturersOf) subs
@@ -277,10 +283,23 @@ cond0 subs fixed = (-&&&-) [ sub' <!> sub
                       | sub <- subs
                       , lect <- lecturersOf sub
                       , ((_, _, dow, num), sub') <- filter (elem lect . lecturersOf . snd) $ fixed
-                      , (target sub' == B1A && elem (target sub) springSems) || (target sub' == B1B && elem (target sub) autumnSems) 
+                      , (target sub' == B1A && elem (target sub) springSems) || (target sub' == B1B && elem (target sub) autumnSems)
                       , s <- varsForSlot `over` sub
                       , asSlot s == Just (toSlot dow num)
                       ]
+
+-- | 固定科目は同一学年の全科目割当て不可
+rest2 :: [Subject] -> TimeTable -> BoolForm
+rest2 subs fixed = (-&&&-) [ (if elem q' [Q1, Q3] then toBF q else neg q) -|- neg s
+                            | sub <- subs
+                            , (y', q', d', h') <- map fst fixed
+                            , seasonOfSubject sub == seasonOf q'
+                            , yearOfSubject sub == y'
+                            , q <- varsForDoubleQuater `over` sub
+                            , s <- varsForSlot `over` sub
+                            , (dowOf <$> asSlot s) == Just d'
+                            , (hourOf <$> asSlot s) == Just h'
+                            ]
 
 -- | 第2学年は月火がだめ、第4学年は月がだめ
 cond1 subs = (-&&&-) [ neg s
@@ -298,7 +317,7 @@ cond1 subs = (-&&&-) [ neg s
                      , elem (asSlot s) [Just s | s <- [Mo1 .. Mo5]]
                      ]
 
--- | 全てのSubjectのslot割当ては1つのみT
+-- | 全てのSubjectの割当ては単一であること
 cond2 subs = (-&&&-) [ neg s1 -|- neg s2
                      | sub <- subs
                      , s1 <- varsForSlot `over` sub
@@ -307,18 +326,6 @@ cond2 subs = (-&&&-) [ neg s1 -|- neg s2
                      ]
              -&-
              (-&&&-)[ (-|||-) [ toBF s | s <- varsForSlot `over` sub] | sub <- subs ]
-
--- | 全てのSubjectのDoubleQuater割当て値は1つのみT
-cond2' subs = (-&&&-) [ neg q1 -|- neg q2
-                     | sub <- subs
-                     , q1 <- varsForDoubleQuater `over` sub
-                     , q2 <- varsForDoubleQuater `over` sub
-                     , q1 < q2
-                     ]
-             -&-
-             (-&&&-) [ (-|||-) [ toBF q | q <- varsForDoubleQuater `over` sub] | sub <- subs ]
-
--- cond2 _ = toBF True
 
 -- | 同学年内では同じ割当てが2回出現することはない
 cond3 subs = (-&&&-) [ sub <!> sub'
@@ -407,74 +414,18 @@ cond9 subs = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
                       , s' <- varsForSlot `over` sub'
                       , asDoW s == asDoW s'
                       ]
-{-
-              -&- -- 2年の講義間に関しても講師は1日に2つ講義を持たない
-              (-&&&-) [ neg q -|- neg (q `on` sub') -|- neg s -|- neg s'
-                      | sub <- subs
-                      , elem (target sub) [B2A .. B2B]
-                      , lecturer <- lecturersOf sub
-                      , sub' <- subs
-                      , elem (target sub') [B2A .. B2B]
-                      , sub < sub'
-                      , elem lecturer (lecturersOf sub')
-                      , q <- varsForDoubleQuater `over` sub
-                      , s <- varsForSlot `over` sub
-                      , s' <- varsForSlot `over` sub'
-                      , asDoW s == asDoW s'
-                      ]
--}
-{-
--- | 講師は同日に1、2校時または2,3校時のペアを持ってはならない。
-              -&-
-              (-&&&-) [ neg q -|- neg (q `on` sub') -|- neg s -|- neg s'
-                      | sub <- subs
-                      , lecturer <- lecturersOf sub
-                      , sub' <- subs
-                      , sub /= sub'
-                      , elem lecturer (lecturersOf sub')
-                      , q <- varsForDoubleQuater `over` sub
-                      , s <- varsForSlot `over` sub
-                      , s' <- varsForSlot `over` sub'
-                      , elem (asSlot s, asSlot s') [(Just a, Just b) | (a, bs) <- [(Mo2, [Mo1, Mo3]), (Tu2, [Tu1, Tu3]), (We2, [We1, We3]), (Th2, [Th1, Th3]), (Fr2, [Fr1, Fr3]), (Mo4, [Mo5]), (Tu4, [Tu5]), (Th4, [Th5])], b <- bs]
-                      ]
--}
---cond10 _ = toBF True
-
--- | 2年と3年の必修科目は重ねない
-cond11' subs = (-&&&-) [ sub <!> sub'
-                      | sub <- filter (flip elem [B2A, B2B, B3A, B3B] . target) $ filter required subs
-                      , sub' <- filter (flip elem [B2A, B2B, B3A, B3B] . target) $ filter required subs
-                      , sub < sub'
-                      ]
-             -&-                -- nコマ連続科目の処理
-             (-&&&-) [ neg q -|- neg (q `on` sub') -|- neg s -|- neg s'
-                     | sub <- filter (flip elem [B2A, B2B, B3A, B3B] . target) $ filter required subs
-                     , Nothing /= isLong sub
-                     , q <- varsForDoubleQuater `over` sub
-                     , s <- varsForSlot `over` sub
-                     , sub' <- filter (flip elem [B2A, B2B, B3A, B3B] . target) $ filter required subs
-                     , sub' /= sub
-                     , s' <- varsForSlot `over` sub'
-                     , (succSlot =<< asSlot s) /= Nothing
-                     , case isLong sub of
-                         Just 2 -> asSlot s' == (succSlot =<< asSlot s)
-                         Just 3 -> asSlot s' == (succSlot =<< asSlot s) || asSlot s' == (succSlot =<< succSlot =<< asSlot s)
-                         _ -> False
-                     ]
-cond11 _ = toBF True
 
 -- | 第3学年DQ2に必修はいれない
-cond12' subs = (-&&&-) [ neg q
+cond10 subs = (-&&&-) [ neg q
                      | sub <- filter required subs
                      , target sub == B3A
                      , q <- varsForDoubleQuater `over` sub
                      -- , s <- varsForSlot `over` sub
                      -- , elem (asDoubleQuater q, asSlot s) [(Just DQ2, Just s) | s <- allItems]
                      ]
-cond12 _ = toBF True
 
 defaultRules :: ([([Subject] -> TimeTable -> BoolForm)], [([Subject] -> BoolForm)])
-defaultRules = ([cond0], [cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8, cond9])
+defaultRules = ([rest1, rest2], [cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8, cond9])
 
 checkConsistenry subjects
   | [] /= invalidPreqs = error $ "`preqs` contains non-existing subject: " ++ head invalidPreqs
@@ -526,7 +477,7 @@ runSolver mkrule fixed subjects = do
         let x = filter (0 <) . (take (length subs * bundleSize)) $ ans
         let comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
         let l = sortBy comp $ map (\s -> (interprete x s, s)) subs
-        let table = fixed ++ (flip map l $ \((q, slot), subject) -> ((yearOf subject, q, dowOf slot, hourOf slot), subject))
+        let table = fixed ++ (flip map l $ \((q, slot), subject) -> ((yearOfSubject subject, q, dowOf slot, hourOf slot), subject))
         let h = if season == Spring then "timetable-spring.tex" else "timetable-automn.tex"
         -- toLatexTable p table
         withFile h WriteMode $ toLatex season table
