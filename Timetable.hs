@@ -551,7 +551,7 @@ runSolver mkrule fixed subjects = do
       forM_ (zip4 [Spring, Autumn] fxs anss [subjectsInSpring, subjectsInAutomn]) $ \(season, fixed, res, subs) -> do
         putStr $ "-------- " ++ if season == Spring then "春学期" else "秋学期"
         let bf = if season == Spring then r1 else r2
-        putStrLn $ "; " ++ show (SAT.numberOfVariables bf, SAT.numberOfClauses bf)
+        putStrLn $ "; " ++ show (numberOfVariables bf, numberOfClauses bf)
         case res of
           [] -> putStrLn "can't solve"
           (r:_) -> printer subs r >> makeTable (season :: Season) fixed subs r
