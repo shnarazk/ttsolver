@@ -3,11 +3,11 @@ import Control.Monad
 import Data.List
 import Timetable
 
-fixed :: [((Card, LQuater, DoW, Card), Subject)]
+fixed :: TimeTable
 fixed = map (\(a, b) -> (a, head (canonize [b]))) $ 
   [
     -- * １年前期
-    ((One, Qone, Mon, One), Sub "体育" B1A True ["先生A"] Nothing [] [] False)
+    ((Y1, Q1, Mon, H1), Sub "体育" B1A True ["先生A"] Nothing [] [] False)
   ]
 
 subjects :: [Subject]
@@ -22,4 +22,6 @@ subjects = canonize
 
 makerule x = (-&&&-) $ map ($ x) (snd defaultRules) ++ map (\f -> f x fixed) (fst defaultRules)
 
-main = runSolver makerule fixed subjects
+main = do
+  putStrLn "running ..."
+  runSolver makerule fixed subjects

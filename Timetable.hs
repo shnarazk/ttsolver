@@ -7,24 +7,27 @@
 module Timetable
        (
          module SAT.CNFIO
-       , Card (..)
+       , Year (..)
+       , Season (..)
        , Quater (..)
-       , LQuater (..)
+       , DoubleQuater (..)
        , DoW (..)
+       , Hour (..)
        , Target (..)
        , springSems
        , autumnSems
        , Slot (..)
        , varsForSlot
-       , varsForQuater
+       , varsForDoubleQuater
        , yearOf
-       , timeOf
+       , hourOf
        , dowOf
        , toSlot
        , asSlot
        , succSlot
        , Subject (..)
        , Sub (..)
+       , TimeTable
        , over
        , on
        , canonize
@@ -50,12 +53,12 @@ import qualified SAT.Solver.SIH4 as SAT
 allItems :: (Bounded a, Enum a) => [a]
 allItems = [minBound.. maxBound]
 
-data Card = One | Two | Thr | Fou | Fiv deriving (Bounded, Enum, Eq, Ord, Show)
-
-data Quater = Q1 | Q2 deriving (Bounded, Enum, Eq, Ord, Read, Show)
-data  LQuater = Qone | Qtwo deriving (Bounded, Enum, Eq, Ord, Show)
-
+data Year = Y1 | Y2 | Y3 | Y4 deriving (Bounded, Enum, Eq, Ord, Show)
+data Season = Spring | Autumn deriving (Bounded, Enum, Eq, Ord, Show)
+data Quater = Q1 | Q2 | Q3 | Q4 deriving (Bounded, Enum, Eq, Ord, Show)
+data DoubleQuater = DQ1 | DQ2 deriving (Bounded, Enum, Eq, Ord, Read, Show)
 data DoW = Mon | Tue | Wed | Thu | Fri deriving (Bounded, Enum, Eq, Ord, Show)
+data Hour = H1 | H2 | H3 | H4 | H5 deriving (Bounded, Enum, Eq, Ord, Show)
 
 data Target = B1A | B1B | B2A | B2B | B3A | B3B | B4A
           deriving (Bounded, Enum, Eq, Ord, Read, Show)
@@ -70,24 +73,26 @@ data Slot = Mo1 | Mo2 | Mo3 | Mo4 | Mo5
           | Fr1 | Fr2 | Fr3 | Fr4
           deriving (Bounded, Enum, Eq, Ord, Read, Show)
 
-toLQuater :: Quater -> LQuater  -- used as latex symbol
-toLQuater Q1 = Qone
-toLQuater Q2 = Qtwo
-
-yearOf :: Subject -> Card
+yearOf :: Subject -> Year
 yearOf (target -> y)
-  | elem y [B1A, B1B] = One
-  | elem y [B2A, B2B] = Two
-  | elem y [B3A, B3B] = Thr
-  | elem y [B4A] = Fou
+  | elem y [B1A, B1B] = Y1
+  | elem y [B2A, B2B] = Y2
+  | elem y [B3A, B3B] = Y3
+  | elem y [B4A] = Y4
 
-timeOf :: Slot -> Card
-timeOf s
-  | elem s [Mo1, Tu1, We1, Th1, Fr1] = One
-  | elem s [Mo2, Tu2, We2, Th2, Fr2] = Two
-  | elem s [Mo3, Tu3, We3, Th3, Fr3] = Thr
-  | elem s [Mo4, Tu4, We4, Th4, Fr4] = Fou
-  | elem s [Mo5, Tu5     , Th5     ] = Fiv
+seasonOf :: Quater -> Season
+seasonOf Q1 = Spring
+seasonOf Q2 = Spring
+seasonOf Q3 = Autumn
+seasonOf Q4 = Autumn
+
+hourOf :: Slot -> Hour
+hourOf s
+  | elem s [Mo1, Tu1, We1, Th1, Fr1] = H1
+  | elem s [Mo2, Tu2, We2, Th2, Fr2] = H2
+  | elem s [Mo3, Tu3, We3, Th3, Fr3] = H3
+  | elem s [Mo4, Tu4, We4, Th4, Fr4] = H4
+  | elem s [Mo5, Tu5     , Th5     ] = H5
 
 dowOf :: Slot -> DoW
 dowOf s
@@ -97,7 +102,7 @@ dowOf s
   | elem s [Th1 .. Th5] = Thu
   | elem s [Fr1 .. Fr4] = Fri
 
-toSlot :: DoW -> Card -> Slot
+toSlot :: DoW -> Hour -> Slot
 toSlot Mon (fromEnum -> n) = [Mo1 .. ] !! n
 toSlot Tue (fromEnum -> n) = [Tu1 .. ] !! n
 toSlot Wed (fromEnum -> n) = [We1 .. ] !! n
@@ -117,6 +122,8 @@ succSlot Fr2 = Nothing
 succSlot Fr4 = Nothing
 succSlot n = Just . toEnum . (1 +) . fromEnum $ n
 
+type Entry = (Year, Quater, DoW, Hour)
+
 data Subject = Subject
                {
                  labelOf :: String -- ^ 科目名
@@ -131,8 +138,7 @@ data Subject = Subject
                }
                deriving (Eq, Ord, Show)
 
---instance Show Subject where
---  show = labelOf
+type TimeTable = [(Entry, Subject)]
 
 data Sub = Sub String Target Bool [String] (Maybe Int) [String] [String] Bool
 
@@ -177,8 +183,8 @@ indexOf l x = loop l 0
     loop [] n = error $ "indexOf: can't find " ++ show x
     loop (y:l) n = if x == y then n else loop l $ n + 1
 
-varsForQuater :: Subject -> (Int, Int)
-varsForQuater s = (base + 1, base + 1)
+varsForDoubleQuater :: Subject -> (Int, Int)
+varsForDoubleQuater s = (base + 1, base + 1)
   where
     base = subjectNumber s * bundleSize
    
@@ -211,24 +217,28 @@ interpretationOf subs x = (sub, kind, 0 < x)
                numQ = 1
            in
             if pos < numQ
-            then show ((toEnum pos) :: Quater)
+            then show ((toEnum pos) :: DoubleQuater)
             else show (toEnum (pos - numQ) :: Slot)
 
 interprete :: [Int] -> Subject -> (Quater, Slot)
 interprete l s
   | s' == [] = error $ "no assignment to " ++ labelOf s 
-  | length s' == 1 = (if [] == q' then Q1 else Q2, head s')
+  | length s' == 1 = case q' of
+    [] | elem (target s) springSems    -> (Q1, head s')
+    [] | elem (target s) autumnSems    -> (Q3,  head s')
+    (x:_) | elem (target s) springSems -> (Q2, head s')
+    (x:_) | elem (target s) autumnSems -> (Q4, head s')
   | otherwise = error $ "strange assignment: " ++ show (labelOf s , (q', s'))
   where
     q' = filter (flip elem qs) l
     s' = map toS $ filter (flip elem ss) l
-    qs = varsForQuater `over` s
+    qs = varsForDoubleQuater `over` s
     ss = varsForSlot `over` s
     toS x = toEnum . subtract numQ $ mod (abs x - 1) bundleSize
     numQ = 1
 
-asQuater :: Int -> Maybe Quater
-asQuater (abs -> n)
+asDoubleQuater :: Int -> Maybe DoubleQuater
+asDoubleQuater (abs -> n)
   | mod (n - 1) bundleSize < 1 = Just (toQ n)
   | otherwise = Nothing
   where
@@ -242,8 +252,8 @@ asSlot (abs -> n)
     toS x = toEnum . subtract numQ $ mod (abs x - 1) bundleSize
     numQ = 1
 
-asDOW :: Int -> Maybe Int
-asDOW (abs -> n)
+asDoW :: Int -> Maybe Int
+asDoW (abs -> n)
   | not (1 < 1 + mod (n - 1) bundleSize) = Nothing
   | elem slot [Mo1 .. Mo5] = Just 1
   | elem slot [Tu1 .. Tu5] = Just 2
@@ -258,7 +268,7 @@ asDOW (abs -> n)
 
 (<!>) :: Subject -> Subject -> BoolForm
 s1 <!> s2 = (-&&&-) [ (q -!- (q `on` s2)) -|- neg s -|- neg (s `on` s2)
-                    | q <- varsForQuater `over` s1
+                    | q <- varsForDoubleQuater `over` s1
                     , s <- varsForSlot `over` s1
                     , s1 /= s2  -- for fail-safe
                     ]
@@ -295,7 +305,7 @@ cond1 subs = (-&&&-) [ neg s
              (-&&&-) [ neg s -&- neg q
                      | sub <- subs
                      , elem (target sub) [B4A]
-                     , q <- varsForQuater `over` sub
+                     , q <- varsForDoubleQuater `over` sub
                      , s <- varsForSlot `over` sub
                      , elem (asSlot s) [Just s | s <- [Mo1 .. Mo5]]
                      ]
@@ -310,15 +320,15 @@ cond2 subs = (-&&&-) [ neg s1 -|- neg s2
              -&-
              (-&&&-)[ (-|||-) [ toBF s | s <- varsForSlot `over` sub] | sub <- subs ]
 
--- | 全てのSubjectのQuater割当て値は1つのみT
+-- | 全てのSubjectのDoubleQuater割当て値は1つのみT
 cond2' subs = (-&&&-) [ neg q1 -|- neg q2
                      | sub <- subs
-                     , q1 <- varsForQuater `over` sub
-                     , q2 <- varsForQuater `over` sub
+                     , q1 <- varsForDoubleQuater `over` sub
+                     , q2 <- varsForDoubleQuater `over` sub
                      , q1 < q2
                      ]
              -&-
-             (-&&&-) [ (-|||-) [ toBF q | q <- varsForQuater `over` sub] | sub <- subs ]
+             (-&&&-) [ (-|||-) [ toBF q | q <- varsForDoubleQuater `over` sub] | sub <- subs ]
 
 -- cond2 _ = toBF True
 
@@ -343,7 +353,7 @@ cond4 subs = (-&&&-) [ neg s
 -- | nコマの科目はそれらのコマにも同学年の他の科目が入ってはいけない
 cond5 subs = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
                      | sub <- filter ((Nothing /=) . isLong) subs
-                     , q <- varsForQuater `over` sub
+                     , q <- varsForDoubleQuater `over` sub
                      , s <- varsForSlot `over` sub
                      , sub' <- subs
                      , target sub == target sub'
@@ -360,9 +370,9 @@ cond5 subs = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
 cond6 subs = (-&&&-) [ neg q' -&- q
                      | sub <- filter (([] /=) . preqsOf) subs
                      , sub' <- map (fromName subs) (preqsOf sub)
-                     , q <- varsForQuater `over` sub
-                     , q' <- varsForQuater `over` sub'
-                     -- , Just True == ((<=) <$> asQuater q <*> asQuater q')
+                     , q <- varsForDoubleQuater `over` sub
+                     , q' <- varsForDoubleQuater `over` sub'
+                     -- , Just True == ((<=) <$> asDoubleQuater q <*> asDoubleQuater q')
                      ]
 
 -- | 同時開講科目のチェック
@@ -370,7 +380,7 @@ cond7 subs = (-&&&-) [ q -=- (q `on` sub')
                      | sub <- filter (([] /=) . sameWith) subs
                      , sub' <- map (fromName subs) (sameWith sub)
                      , sub /= sub'
-                     , q <- varsForQuater `over` sub
+                     , q <- varsForDoubleQuater `over` sub
                      ]
 
 -- | 演習室はひとつしかない
@@ -383,7 +393,7 @@ cond8 subs = (-&&&-) [ sub' <!> sub
              (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
                      | sub <- filter atComputerRoom subs
                      , Nothing /= isLong sub
-                     , q <- varsForQuater `over` sub
+                     , q <- varsForDoubleQuater `over` sub
                      , s <- varsForSlot `over` sub
                      , sub' <- filter atComputerRoom subs
                      , sub' /= sub
@@ -404,10 +414,10 @@ cond9 subs = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
                       , elem (target sub') [B2A ..]
                       , sub < sub'
                       , elem lecturer (lecturersOf sub')
-                      , q <- varsForQuater `over` sub
+                      , q <- varsForDoubleQuater `over` sub
                       , s <- varsForSlot `over` sub
                       , s' <- varsForSlot `over` sub'
-                      , asDOW s == asDOW s'
+                      , asDoW s == asDoW s'
                       ]
 {-
               -&- -- 2年の講義間に関しても講師は1日に2つ講義を持たない
@@ -419,10 +429,10 @@ cond9 subs = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
                       , elem (target sub') [B2A .. B2B]
                       , sub < sub'
                       , elem lecturer (lecturersOf sub')
-                      , q <- varsForQuater `over` sub
+                      , q <- varsForDoubleQuater `over` sub
                       , s <- varsForSlot `over` sub
                       , s' <- varsForSlot `over` sub'
-                      , asDOW s == asDOW s'
+                      , asDoW s == asDoW s'
                       ]
 -}
 {-
@@ -434,7 +444,7 @@ cond9 subs = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
                       , sub' <- subs
                       , sub /= sub'
                       , elem lecturer (lecturersOf sub')
-                      , q <- varsForQuater `over` sub
+                      , q <- varsForDoubleQuater `over` sub
                       , s <- varsForSlot `over` sub
                       , s' <- varsForSlot `over` sub'
                       , elem (asSlot s, asSlot s') [(Just a, Just b) | (a, bs) <- [(Mo2, [Mo1, Mo3]), (Tu2, [Tu1, Tu3]), (We2, [We1, We3]), (Th2, [Th1, Th3]), (Fr2, [Fr1, Fr3]), (Mo4, [Mo5]), (Tu4, [Tu5]), (Th4, [Th5])], b <- bs]
@@ -452,7 +462,7 @@ cond11' subs = (-&&&-) [ sub <!> sub'
              (-&&&-) [ neg q -|- neg (q `on` sub') -|- neg s -|- neg s'
                      | sub <- filter (flip elem [B2A, B2B, B3A, B3B] . target) $ filter required subs
                      , Nothing /= isLong sub
-                     , q <- varsForQuater `over` sub
+                     , q <- varsForDoubleQuater `over` sub
                      , s <- varsForSlot `over` sub
                      , sub' <- filter (flip elem [B2A, B2B, B3A, B3B] . target) $ filter required subs
                      , sub' /= sub
@@ -465,24 +475,25 @@ cond11' subs = (-&&&-) [ sub <!> sub'
                      ]
 cond11 _ = toBF True
 
--- | 第3学年Q2に必修はいれない
+-- | 第3学年DQ2に必修はいれない
 cond12' subs = (-&&&-) [ neg q
                      | sub <- filter required subs
                      , target sub == B3A
-                     , q <- varsForQuater `over` sub
+                     , q <- varsForDoubleQuater `over` sub
                      -- , s <- varsForSlot `over` sub
-                     -- , elem (asQuater q, asSlot s) [(Just Q2, Just s) | s <- allItems]
+                     -- , elem (asDoubleQuater q, asSlot s) [(Just DQ2, Just s) | s <- allItems]
                      ]
 cond12 _ = toBF True
 
+defaultRules :: ([([Subject] -> TimeTable -> BoolForm)], [([Subject] -> BoolForm)])
 defaultRules = ([cond0], [cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8, cond9])
 
 checkConsistenry subjects
   | [] /= preqs \\ labels = error $ "`preqs` contains non-existing subject: " ++ show (preqs, labels)
   | [] /= sames \\ labels = error $ "`same` contains non-existing subject: " ++ show (sames, labels)
   | any ([] ==) (map lecturersOf subjects) = error $ "subject without lecturer: " ++ show (filter (([] ==) . lecturersOf) subjects)
-  | [] /= out1 = error $ "Q1, Q2科目内で順序が閉じてない: " ++ head out1
-  | [] /= out2 = error $ "Q3, Q4科目内で順序が閉じてない: " ++ head out2
+  | [] /= out1 = error $ "春学期内で順序が閉じてない: " ++ head out1
+  | [] /= out2 = error $ "秋学期内で順序が閉じてない: " ++ head out2
   | 23 < length lects = error $ "too many lecturers:" ++ intercalate "," lects
   | otherwise = True
   where
@@ -496,8 +507,12 @@ checkConsistenry subjects
     n = length subjects
     lects = nub $ concatMap lecturersOf subjects
 
-splitBySeason subs = (renumber $ filter ((flip elem springSems) . target) subs, renumber $ filter ((flip elem autumnSems) . target) subs)
+splitBySeason subs = (
+    renumber $ filter ((flip elem springSems) . target) subs
+  , renumber $ filter ((flip elem autumnSems) . target) subs
+  )
 
+runSolver :: ([Subject] -> BoolForm) -> TimeTable -> [Subject] -> IO ()
 runSolver mkrule fixed subjects = do
   let (subjectsInSpring, subjectsInAutomn) = splitBySeason subjects
   os <- getArgs
@@ -512,19 +527,19 @@ runSolver mkrule fixed subjects = do
         let b2l = filter (flip elem [B2A, B2B] . target . snd) l
         let b3l = filter (flip elem [B3A, B3B] . target . snd) l
         let b4l = filter (flip elem [B4A] . target . snd) l
-        forM_ [("B1", b1l), ("B2", b2l), ("B3", b3l), ("B4", b4l)] $ \(y, yl) -> do
-          putStrLn $ "### " ++ y
+        forM_ [(Y1, b1l), (Y2, b2l), (Y3, b3l), (Y4, b4l)] $ \(y, yl) -> do
+          putStrLn $ "### " ++ show y
           forM_ yl $ \((q, r), s) -> do
             putStr $ printf "%s %s: %-24s" (show q) (show r) (labelOf s)
             putStrLn . ("\t" ++) . intercalate ", " $ lecturersOf s
-  let makeTable fixed subs ans = do
+  let makeTable season fixed subs ans = do
         let x = filter (0 <) . (take (length subs * bundleSize)) $ ans
         let comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
         let l = sortBy comp $ map (\s -> (interprete x s, s)) subs
-        let table = fixed ++ (flip map l $ \((quater, slot), subject) -> ((yearOf subject, toLQuater quater, dowOf slot, timeOf slot), subject))
-        let (h, p) = if subs == subjectsInSpring then ("timetable-spring.tex", "Sp") else ("timetable-automn.tex", "Au")
+        let table = fixed ++ (flip map l $ \((q, slot), subject) -> ((yearOf subject, q, dowOf slot, hourOf slot), subject))
+        let h = if season == Spring then "timetable-spring.tex" else "timetable-automn.tex"
         -- toLatexTable p table
-        withFile h WriteMode $ toLatex p table
+        withFile h WriteMode $ toLatex season table
   case os of
     ("-i":_) -> do
       printer (if elem "B" os then subjectsInAutomn else subjectsInSpring) . read =<< getContents
@@ -533,53 +548,73 @@ runSolver mkrule fixed subjects = do
     _ -> do
       let anss = map (SAT.satisfiable (:) . asList) [r1, r2]
       let fxs = [filter ((B1A ==) . target . snd) fixed, filter ((B1B ==) . target . snd) fixed]
-      forM_ (zip3 fxs anss [subjectsInSpring, subjectsInAutomn]) $ \(fixed, res, subs) -> do
-        putStr $ "-------- " ++ if subs == subjectsInSpring then "春学期" else "秋学期"
-        let (Cnf (n, _) l) = if subs == subjectsInSpring then r1 else r2
+      forM_ (zip4 [Spring, Autumn] fxs anss [subjectsInSpring, subjectsInAutomn]) $ \(season, fixed, res, subs) -> do
+        putStr $ "-------- " ++ if season == Spring then "春学期" else "秋学期"
+        let (Cnf (n, _) l) = if season == Spring then r1 else r2
         putStrLn $ "; " ++ show (n, length l)
         case res of
           [] -> putStrLn "can't solve"
-          (r:_) -> printer subs r >> makeTable fixed subs r
+          (r:_) -> printer subs r >> makeTable (season :: Season) fixed subs r
 
-toLatex :: String -> [((Card, LQuater, DoW, Card), Subject)] -> Handle -> IO ()
-toLatex p table h = do
+toLatex :: Season -> TimeTable -> Handle -> IO ()
+toLatex season table h = do
   forM_ tags $ \(k@(_, q, _, _), s) -> do
+    let dq = if elem q [Q1, Q3] then DQ1 else DQ2
     case find ((k ==) . fst) table of
       Just (_, sub) -> do
         let name = labelOf sub
         let lec = lecturersOf sub
         case (required sub, atComputerRoom sub) of
           (True , True ) -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{blue!10}\\textcolor{red}{\\textbf{%s}}}" p s name
-          (True , False) | q == Qone -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\textcolor{red}{\\textbf{%s}}}" p s name
-          (True , False) | q == Qtwo -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}\\textcolor{red}{\\textbf{%s}}}" p s name
+          (True , False) | dq == DQ1 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\textcolor{red}{\\textbf{%s}}}" p s name
+          (True , False) | dq == DQ2 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}\\textcolor{red}{\\textbf{%s}}}" p s name
           (False, True ) -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{blue!10}%s}" p s name
-          (False, False) | q == Qone -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{%s}" p s name
-          (False, False) | q == Qtwo -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}%s}" p s name
-        if q == Qone
+          (False, False) | dq == DQ1 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{%s}" p s name
+          (False, False) | dq == DQ2 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}%s}" p s name
+          _ -> putStrLn $ "unhandled pattern: " ++ show (labelOf sub) ++ " @ " ++ show q
+        if q == Q1
           then hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\footnotesize %s}" p s (head lec)
           else hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}\\footnotesize %s}" p s (head lec)
-      _ | q == Qone -> do
+      _ | q == Q1 -> do
         hPutStr h $ printf "\\newcommand{\\%s%sSub}{}" p s
         hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{}" p s
       _ -> do
         hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}}" p s
         hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}}" p s
   where
-    tags = [ ( (y, q, d, s)
-             , (printf "%s%s%s%s" (show y) (show q) (show d) (show s)) :: String)
-           | y <- [minBound :: Card .. Fou]
-           , q <- [minBound :: LQuater .. maxBound]
+    p :: String
+    p = if season == Spring then "Sp" else "Au"
+    tags = [ ( (y, q, d, h)
+             , (printf "%s%s%s%s" (yp y) (qp q) (show d) (hp h)) :: String)
+           | y <- [minBound :: Year .. maxBound]
+           , q <- [minBound :: Quater .. maxBound]
            , d <- [minBound :: DoW .. maxBound]
-           , s <- [minBound :: Card .. Fiv]
+           , h <- [minBound :: Hour .. maxBound]
            ]
+    yp :: Year -> String
+    yp Y1 = "One"
+    yp Y2 = "Two"
+    yp Y3 = "Thr"
+    yp Y4 = "Fou"
+    qp :: Quater -> String
+    qp Q1 = "Qone"
+    qp Q2 = "Qtwo"
+    qp Q3 = "Qthr"
+    qp Q4 = "Qfou"
+    hp :: Hour -> String
+    hp H1 = "One"
+    hp H2 = "Two"
+    hp H3 = "Thr"
+    hp H4 = "Fou"
+    hp H5 = "Fiv"
 
-toLatexTable :: String -> [(Subject, (Card, LQuater, DoW, Card), (String, [String]))] -> IO ()
+toLatexTable :: String -> [(Subject, Entry, (String, [String]))] -> IO ()
 toLatexTable p _ = do
-  forM_ [minBound :: DoW .. maxBound] $ \d -> do
-    forM_ [minBound :: Card .. Fiv] $ \s -> do
+  forM_ (allItems :: [DoW]) $ \d -> do
+    forM_ (allItems :: [Hour]) $ \s -> do
       putStr $ "&" ++ show (fromEnum s + 1) ++ "&"
-      forM_ [minBound :: Card .. Fou] $ \y -> do
-        forM_ [minBound :: LQuater .. maxBound] $ \q -> do
+      forM_ (allItems :: [Year]) $ \y -> do
+        forM_ (allItems :: [Quater]) $ \q -> do
           putStr ((printf "\\%s%s%s%s%sSub&" p (show y) (show q) (show d) (show s)) :: String)
           putStr ((printf "\\%s%s%s%s%sLec" p (show y) (show q) (show d) (show s)) :: String)
-          if q == maxBound && y == Fou then putStrLn "\\\\\\hline" else putStr "&"
+          if q == maxBound && y == Y1 then putStrLn "\\\\\\hline" else putStr "&"
