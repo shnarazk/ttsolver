@@ -572,10 +572,10 @@ toLatex season table h = do
           (False, False) | dq == DQ1 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{%s}" p s name
           (False, False) | dq == DQ2 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}%s}" p s name
           _ -> putStrLn $ "unhandled pattern: " ++ show (labelOf sub) ++ " @ " ++ show q
-        if q == Q1
+        if dq == DQ1
           then hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\footnotesize %s}" p s (head lec)
           else hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}\\footnotesize %s}" p s (head lec)
-      _ | q == Q1 -> do
+      _ | dq == DQ1 -> do
         hPutStr h $ printf "\\newcommand{\\%s%sSub}{}" p s
         hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{}" p s
       _ -> do
