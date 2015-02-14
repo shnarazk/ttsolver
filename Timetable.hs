@@ -512,7 +512,8 @@ toLatex season table h = do
     case find ((k ==) . fst) table of
       Just (_, sub) -> do
         let name = labelOf sub
-        let lec = lecturersOf sub
+        let lecs' = intercalate "," $ lecturersOf sub
+        let lecs = if 5 < length lecs' then "\\tiny " ++ lecs' else lecs'
         case (required sub, atComputerRoom sub) of
           (True , True ) -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{blue!10}\\textcolor{red}{\\textbf{%s}}}" p s name
           (True , False) | dq == DQ1 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\textcolor{red}{\\textbf{%s}}}" p s name
@@ -522,8 +523,8 @@ toLatex season table h = do
           (False, False) | dq == DQ2 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}%s}" p s name
           _ -> putStrLn $ "unhandled pattern: " ++ show (labelOf sub) ++ " @ " ++ show q
         if dq == DQ1
-          then hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\footnotesize %s}" p s (head lec)
-          else hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}\\footnotesize %s}" p s (head lec)
+          then hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\footnotesize %s}" p s lecs
+          else hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}\\footnotesize %s}" p s lecs
       _ | dq == DQ1 -> do
         hPutStr h $ printf "\\newcommand{\\%s%sSub}{}" p s
         hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{}" p s
