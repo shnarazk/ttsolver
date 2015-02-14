@@ -525,6 +525,11 @@ toLatex season table h = do
         if dq == DQ1
           then hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\footnotesize %s}" p s lecs
           else hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}\\footnotesize %s}" p s lecs
+      _ | follwingCell k -> do
+        hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{blue!10}\\hfil↑\\hfil}" p s
+        if dq == DQ1
+          then hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{}" p s
+          else hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}}" p s
       _ | dq == DQ1 -> do
         hPutStr h $ printf "\\newcommand{\\%s%sSub}{}" p s
         hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{}" p s
@@ -532,6 +537,15 @@ toLatex season table h = do
         hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}}" p s
         hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}}" p s
   where
+    follwingCell (y, q, d, h)
+      | elem h [H1, H3] = False
+      | Just (_, sub) <- find ((k' ==) . fst) table = Nothing /= isLong sub && atComputerRoom sub
+      | elem h [H2, H4] = False
+      | Just (_, sub) <- find ((k'' ==) . fst) table = Just 3 == isLong sub  && atComputerRoom sub
+      | otherwise = False
+      where
+        k' = (y, q, d, pred h)
+        k'' = (y, q, d, pred (pred h))
     p :: String
     p = if season == Spring then "Sp" else "Au"
     tags = [ ( (y, q, d, h)
