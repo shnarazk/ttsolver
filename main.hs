@@ -1,6 +1,4 @@
 module Main where
-import Control.Monad
-import Data.List
 import Timetable
 
 subjects :: [Subject]
@@ -16,6 +14,4 @@ subjects = canonize
 
 makerule x = (-&&&-) $ map ($ x) defaultRules
 
-main = do
-  putStrLn "running ..."
-  runSolver "sample data" makerule subjects
+main = runSolver "sample data" makerule subjects
