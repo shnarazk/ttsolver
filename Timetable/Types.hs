@@ -106,7 +106,7 @@ data Subject = Subject
                , preqsOf :: [String]     -- ^ 履修条件
                , sameWith :: [String]    -- ^ 同時開講科目
                , atComputerRoom :: Bool    -- ^ 演習室使用
-               , subjectNumber :: Either Int (Entry)
+               , subjectNumber :: Either Int Entry
                }
                deriving (Eq, Ord, Show)
 
@@ -130,7 +130,7 @@ instance LectureYear Entry where
   asYear (y, _, _) = y
 
 instance LectureYear Target where
-  asYear (TargetSeason y _) = y 
+  asYear (TargetSeason y _) = y
   asYear (TargetQuarter y _) = y
   asYear (TargetFixed e) = asYear e
 
@@ -176,6 +176,26 @@ class LectureHour a where
   asDoW :: a -> DoW
   asHour :: a -> Hour
 
+instance LectureHour Slot where
+  asSlot = id
+  asDoW (Slot d _) = d
+  asHour (Slot _ h) = h
+
+instance LectureHour Entry where
+  asSlot (_, _, s) = s
+  asDoW (_, _, s) = asDoW s
+  asHour (_, _, s) = asHour s
+
+instance LectureHour (Subject, Int) where
+  asSlot (s, i)
+    | Right e <- subjectNumber s = asSlot e
+    | start < i && i <= start + bitsForSubject = toEnum $ indexFromVar i
+    where
+       (Left nth) = subjectNumber s
+       start = bitsForSubject * (nth - 1)
+  asDoW = asDoW . asSlot
+  asHour = asHour . asSlot
+
 isFixed :: Subject -> Bool
 isFixed (subjectNumber -> Left _) = False
 isFixed (subjectNumber -> Right _) = True
@@ -198,9 +218,9 @@ renumber l = loop l 1
     loop (sub@(isFixed -> False):l) n = sub { subjectNumber = Left n } : loop l (n + 1)
 
 unfoldSubject :: Sub -> [Subject]
-unfoldSubject sub@(Fixed la en re ls is pr sa at) = [Subject la (TargetFixed en) re ls is pr sa at (Right en)]
-{-
-unfoldSubject sub@(Sub la ta re ls is pr sa at)
+unfoldSubject sub@(Fixed la e re ls is pr sa at) = [Subject la (TargetFixed e) re ls is pr sa at (Right e)]
+unfoldSubject sub@(FixedQ la (y, q) re ls is pr sa at) = [Subject la (TargetQuarter y q) re ls is pr sa at (Left 0)]
+unfoldSubject sub@(Sub la (y, s) re ls is pr sa at)
   -- 科目名が'で終わると同時開講
   | lc == '\''  = [Subject namep ta re ls is pr sa at z, Subject nameq ta re ls is pr [namep] at z]
   -- 科目名が*で終わると2クォーター開講
@@ -209,6 +229,7 @@ unfoldSubject sub@(Sub la ta re ls is pr sa at)
   | lc == '?'   = [Subject name  ta re ls is pr sa at z, Subject (name ++ "?") ta re ls is pr sa at z]
   | otherwise   = [Subject la ta re ls is pr sa at z]
     where
+      ta = TargetSeason y s
       z = Left 0
       name1 = init la ++ "→"
       name2 = "→" ++ init la
@@ -216,7 +237,6 @@ unfoldSubject sub@(Sub la ta re ls is pr sa at)
       nameq = init la ++ "''"
       name = init la
       lc = last la
--}
 
 quaterVars :: Subject -> (Int, Int)
 quaterVars s@(subjectNumber -> Right _) = error "varsForDoubleQuarter"
