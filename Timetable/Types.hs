@@ -8,34 +8,31 @@
 module Timetable.Types
        (
          module SAT.CNFIO
+       , LectureYear (..)
        , LectureDate (..)
+       , LectureHour (..)
        , Year (..)
        , Season (..)
        , Quarter (..)
        , DoW (..)
        , Hour (..)
-{-
-       , LectureHour (..)
        , Target (..)
-       , springSems
-       , autumnSems
        , Slot (..)
-       , varsForSlot
-       , varsForDoubleQuarter
-       , yearOfSubject
-       , hourOf
-       , dowOf
-       , toSlot
-       , asSlot
+       , quarterVars
+       , slotVars
        , succSlot
        , Subject (..)
        , Sub (..)
        , TimeTable
        , over
        , on
+       , canonize
        , renumber
        , isFixed
--}
+       , allItems
+       , asEntry
+       , bitsForSubject
+       , (<!>)
        )
        where
 import Control.Applicative
@@ -133,6 +130,9 @@ instance LectureYear Target where
   asYear (TargetSeason y _) = y
   asYear (TargetQuarter y _) = y
   asYear (TargetFixed e) = asYear e
+
+instance LectureYear Subject where
+  asYear = asYear . target
 
 class LectureDate a where
   asSeason :: a -> Season
@@ -238,9 +238,9 @@ unfoldSubject sub@(Sub la (y, s) re ls is pr sa at)
       name = init la
       lc = last la
 
-quaterVars :: Subject -> (Int, Int)
-quaterVars s@(subjectNumber -> Right _) = error "varsForDoubleQuarter"
-quaterVars s@(subjectNumber -> Left n) = (base + 1, base + 1)
+quarterVars :: Subject -> (Int, Int)
+quarterVars s@(subjectNumber -> Right _) = error "varsForDoubleQuarter"
+quarterVars s@(subjectNumber -> Left n) = (base + 1, base + 1)
   where
     base = (n - 1) * bitsForSubject
 
@@ -270,7 +270,7 @@ splitBySeason l = (renumber $ filter ((Spring ==) . asSeason) l, renumber $ filt
 -- | imcompatible relation
 (<!>) :: Subject -> Subject -> BoolForm
 s1 <!> s2 = (-&&&-) [ (q -!- (q `on` s2)) -|- neg s -|- neg (s `on` s2)
-                    | q <- quaterVars `over` s1
+                    | q <- quarterVars `over` s1
                     , s <- slotVars `over` s1
                     , asSeason s1 == asSeason s2
                     , s1 /= s2  -- for fail-safe
@@ -290,35 +290,22 @@ slotOfEntry (_, _, Tue, h) = [Tu1 ..] !! fromEnum h
 slotOfEntry (_, _, Wed, h) = [We1 ..] !! fromEnum h
 slotOfEntry (_, _, Thu, h) = [Th1 ..] !! fromEnum h
 slotOfEntry (_, _, Fri, h) = [Fr1 ..] !! fromEnum h
+-}
 
-interpretationOf :: [Subject] -> Int -> (Subject, String, Bool)
-interpretationOf subs x = (sub, kind, 0 < x)
-  where
-    sub :: Subject
-    sub = subs !! div (abs x) bundleSize
-    kind :: String
-    kind = let pos = mod (abs x - 1) bundleSize
-               numQ = 1
-           in
-            if pos < numQ
-            then show ((toEnum pos) :: DoubleQuarter)
-            else show (toEnum (pos - numQ) :: Slot)
-
-interprete :: [Int] -> Subject -> (Quarter, Slot)
-interprete l s@(subjectNumber -> Right e@(_, q, _, _)) = (q, slotOfEntry e)
-interprete l s
+asEntry :: (Subject, [Int]) -> Entry
+asEntry (fst -> subjectNumber -> Right e) = e
+asEntry (s, l)
   | s' == [] = error $ "no assignment to " ++ labelOf s
   | length s' == 1 = case q' of
-    [] | elem (target s) springSems    -> (Q1, head s')
-    [] | elem (target s) autumnSems    -> (Q3, head s')
-    (x:_) | elem (target s) springSems -> (Q2, head s')
-    (x:_) | elem (target s) autumnSems -> (Q4, head s')
+    [] | asSeason s == Spring    -> (asYear s, Q1, asSlot (s, (head s')))
+    [] | asSeason s == Autumn    -> (asYear s, Q3, asSlot (s, (head s')))
+    (x:_) | asSeason s == Spring -> (asYear s, Q2, asSlot (s, (head s')))
+    (x:_) | asSeason s == Autumn -> (asYear s, Q4, asSlot (s, (head s')))
   | otherwise = error $ "strange assignment: " ++ show (labelOf s , (q', s'))
   where
     q' = filter (flip elem qs) l
-    s' = map toS $ filter (flip elem ss) l
-    qs = varsForDoubleQuarter `over` s
-    ss = varsForSlot `over` s
-    toS x = toEnum . subtract numQ $ mod (abs x - 1) bundleSize
+    s' = filter (flip elem ss) l
+    qs = quarterVars `over` s
+    ss = slotVars `over` s
     numQ = 1
--}
+
