@@ -452,6 +452,15 @@ cond8 ss = (-&&&-) [ sub' <!> sub
                    , sub' <- filter atComputerRoom subs
                    , sub' < sub
                    ]
+           -&-                  --
+           (-&&&-) [ (if elem q' [Q1, Q3] then toBF q else neg q) -|- neg s
+                   | sub <- filter atComputerRoom subs
+                   , (y', q', d', h') <- map (\(subjectNumber -> Right e) -> e) (filter atComputerRoom fixed)
+                   , q <- varsForDoubleQuarter `over` sub
+                   , s <- varsForSlot `over` sub
+                   , (dowOf <$> as_Slot s) == Just d'
+                   , (hourOf <$> as_Slot s) == Just h'
+                   ]
            -&-                -- nコマ連続科目の処理
            (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
                    | sub <- filter atComputerRoom subs
@@ -467,8 +476,21 @@ cond8 ss = (-&&&-) [ sub' <!> sub
                      Just 3 -> as_Slot s' == (succSlot =<< as_Slot s) || as_Slot s' == (succSlot =<< succSlot =<< as_Slot s)
                      _ -> False
                    ]
+           -&-                  --
+           (-&&&-) [ (if elem q' [Q1, Q3] then toBF q else neg q) -|- neg s
+                   | sub <- filter atComputerRoom subs
+                   , (sub', (_, q', d', h')) <- map (\s@(subjectNumber -> Right e) -> (s, e)) (filter atComputerRoom fixed)
+                   , q <- varsForDoubleQuarter `over` sub
+                   , s <- varsForSlot `over` sub
+                   , (dowOf <$> as_Slot s) == Just d'
+                   , case isLong sub' of
+                     Just 2 -> (hourOf <$> as_Slot s) == Just (succ h')
+                     Just 3 -> (hourOf <$> as_Slot s) == Just (succ h') || (hourOf <$> as_Slot s) == Just (succ $ succ h')
+                     _ -> False
+                   ]
   where
     subs  = filter (not . isFixed) ss
+    fixed = filter isFixed ss
 
 -- | 3,4年の講義に関しては講師は1日に2つ講義を持たない
 cond9 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
