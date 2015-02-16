@@ -560,36 +560,33 @@ runSolver dataName mkrule subjects = do
     seasonIs s (subjectNumber -> Right e) = seasonOfEntry e == s
     seasonIs _ _ = error "seasonIs"
   let
-    printer :: [Subject] -> [Int] -> IO ()
-    printer subs ans = do
-        let x = filter (0 <) . (take (length subs * bundleSize)) $ ans
-        let comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
-        let l = sortBy comp $ map (\s -> (interprete x s, s)) subs
-        let b1l = filter (flip elem [B1A, B1B] . target . snd) l
-        let b2l = filter (flip elem [B2A, B2B] . target . snd) l
-        let b3l = filter (flip elem [B3A, B3B] . target . snd) l
-        let b4l = filter (flip elem [B4A] . target . snd) l
-        forM_ [(Y1, b1l), (Y2, b2l), (Y3, b3l), (Y4, b4l)] $ \(y, yl) -> do
-          putStrLn $ "### " ++ show y
-          forM_ yl $ \((q, r), s) -> do
-            putStr $ printf "%s %s: %-24s" (show q) (show r) (labelOf s)
-            putStrLn . ("\t" ++) . intercalate ", " $ lecturersOf s
+    assignTable :: Season -> [Subject] -> [Int] -> TimeTable
+    assignTable season subs ans = table
+      where
+        x = filter (0 <) . (take (length subs * bundleSize)) $ ans
+        comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
+        l = sortBy comp $ map (\s -> (interprete x s, s)) subs
+        table = flip map l $ \((q, slot), subject) -> ((yearOfSubject subject, q, dowOf slot, hourOf slot), subject)
+  let
+    printer :: Season -> [Subject] -> [Int] -> IO ()
+    printer season subs ans = do
+        forM_ [Y1 .. Y4] $ \y' -> do
+          putStrLn $ "### " ++ show y'
+          forM_ (assignTable season subs ans) $ \((y, q, d, h), s) -> do
+            when (y == y') $ do
+              putStr $ printf "%s %s %s: %-24s" (show q) (show d) (show h) (labelOf s)
+              putStrLn . ("\t" ++) . intercalate ", " $ lecturersOf s
   let
     makeTable :: Season -> [Subject] -> [Int] -> IO ()
     makeTable season subs ans = do
-        let x = filter (0 <) . (take (length subs * bundleSize)) $ ans
-        let comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
-        let l = sortBy comp $ map (\s -> (interprete x s, s)) subs
-        let fixed = tableOfFixed $ filter (seasonIs season) $ filter isFixed subjects
-        let table = fixed ++ (flip map l $ \((q, slot), subject) -> ((yearOfSubject subject, q, dowOf slot, hourOf slot), subject))
         let h = if season == Spring then "timetable-spring.tex" else "timetable-automn.tex"
         -- toLatexTable p table
-        withFile h WriteMode $ toLatex dataName season table
+        withFile h WriteMode $ toLatex dataName season (assignTable season subs ans)
   case os of
     ("-i":_) | elem "B" os -> do
-      printer subjectsInAutomn . read =<< getContents
+      printer Autumn subjectsInAutomn . read =<< getContents
     ("-i":_) -> do
-      printer subjectsInSpring . read =<< getContents
+      printer Spring subjectsInSpring . read =<< getContents
     ("-d":_) -> do
       putStrLn . asCNFString $ if elem "B" os then r2 else r1
     _ -> do
@@ -600,7 +597,14 @@ runSolver dataName mkrule subjects = do
         putStrLn $ "; " ++ show (numberOfVariables bf, numberOfClauses bf)
         case res of
           [] -> putStrLn "can't solve"
-          (r:_) -> printer subs r >> makeTable (season :: Season) subs r
+          (r:_) -> printer season subs r >> makeTable (season :: Season) subs r
+        when (not (null (anss !! 0)) && not (null (anss !! 0))) $ do
+          let fulltable = concat [ assignTable s sub (head ans)
+                                 | s <- [Spring, Autumn]
+                                 | sub <- [subjectsInSpring, subjectsInAutomn]
+                                 | ans <- anss
+                                 ]
+          dumpReport fulltable      -- summary report
 
 toLatex :: String -> Season -> TimeTable -> Handle -> IO ()
 toLatex dataName season table h = do
@@ -688,3 +692,14 @@ currentTimeString = do
 
 tableOfFixed :: [Subject] -> TimeTable
 tableOfFixed l = map (\s@(subjectNumber -> Right e) -> (e, s)) $ filter isFixed l
+
+dumpReport :: TimeTable -> IO ()
+dumpReport table = do
+  forM_ lects $ \lect -> do
+    putStr lect
+    let subs = gather lect
+    putStr . ("\t: " ++) . show . map (\q -> length . filter (\((_, q', _, _), _) -> q' == q) $ subs) $ [Q1 .. Q4]
+    putStrLn . (" " ++) . intercalate ", " . map (labelOf . snd) $ subs
+  where
+    lects = sort . nub . concatMap (lecturersOf . snd) $ table
+    gather key = filter (elem key . lecturersOf . snd) $ table
