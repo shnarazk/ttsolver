@@ -34,6 +34,8 @@ module Timetable.Types
        , bitsForSubject
        , (<!>)
        , anotherQuarterBool
+       , shareSlot
+       , fromName
        )
        where
 import Control.Applicative
@@ -248,7 +250,7 @@ unfoldSubject sub@(Sub la (y, s) re ls is pr sa at)
       lc = last la
 
 quarterVars :: Subject -> (Int, Int)
-quarterVars s@(subjectNumber -> Right _) = error "varsForDoubleQuarter"
+quarterVars s@(subjectNumber -> Right _) = error $ "quarterVars on fixed lecture:"  ++ labelOf s
 quarterVars s@(subjectNumber -> Left n) = (base + 1, base + 1)
   where
     base = (n - 1) * bitsForSubject
@@ -311,22 +313,37 @@ asEntry (s, l)
 
 -- | imcompatible relation
 (<!>) :: Subject -> Subject -> BoolForm
-s1 <!> s2 = (-&&&-) [ (q -!- (q `on` s2)) -|- neg s -|- neg (s `on` s2)
-                    | q <- quarterVars `over` s1
-                    , s <- slotVars `over` s1
-                    , asSeason s1 == asSeason s2
-                    , s1 /= s2  -- for fail-safe
-                    ]
+s1 <!> s2
+  | isFixed s1 = error "the first arg of (<!>) is fixed"
+  | otherwise = (-&&&-) [ (q -!- (q `on` s2)) -|- neg s -|- neg (s `on` s2)
+                        | q <- quarterVars `over` s1
+                        , s <- slotVars `over` s1
+                        , asSeason s1 == asSeason s2
+                        , s1 /= s2  -- for fail-safe
+                        ]
 
 anotherQuarterBool :: Subject -> Subject -> BoolForm
 anotherQuarterBool s s'
+  | isFixed s && isFixed s' = error $ "anotherQuarterBool accepts fixed lectures: " ++ labelOf s ++ " and " ++ labelOf s'
   | Right e <- subjectNumber s = case asQuarter s of -- もし固定科目ならその反対
     Q1 -> neg j
     Q2 -> toBF j
     Q3 -> neg j
     Q4 -> toBF j
+  | Right e <- subjectNumber s' = case asQuarter s' of -- もし固定科目ならその反対
+    Q1 -> neg i
+    Q2 -> toBF i
+    Q3 -> neg i
+    Q4 -> toBF i
   | asSeason s == asSeason s' = i -!- j         -- そうでなく季節が同じなら変数間制約
   | otherwise = toBF True                       -- 季節が違う場合は無視
   where
     i = head $ quarterVars `over` s
     j = head $ quarterVars `over` s'
+
+shareSlot :: (LectureHour d1, LectureHour d2) => Subject -> d1 -> d2 -> Bool
+shareSlot sub (asSlot -> s1) (asSlot -> s2) =
+  case isLong sub of
+    Nothing -> s1 == s2
+    Just 2  -> s1 == s2 || Just s2 == succSlot s1
+    Just 3  -> s1 == s2 || Just s2 == (succSlot s1) || Just s2 == (succSlot =<< succSlot s1)
