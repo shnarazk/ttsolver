@@ -26,46 +26,6 @@ import Timetable.Types
 -- RULES
 --------------------------------------------------------------------------------
 
--- | 講師は同一時間帯は持てない
-rest1 :: [Subject] -> BoolForm
-rest1 ss = (-&&&-) [ sub' <!> sub
-                   | sub <- subs
-                   , lecturer <- lecturersOf sub
-                   , sub' <- filter (elem lecturer . lecturersOf) subs
-                   , sub < sub'
-                   ]
-           -&-                  -- 固定科目との整合性
-           (-&&&-) [ neg q -|- neg s
-                   | sub <- subs
-                   , lect <- lecturersOf sub
-                   , sub'@(subjectNumber -> Right (_, qu', slot')) <- filter (elem lect . lecturersOf) fixed
-                   , q <- quarterVars `over` sub
-                   , asQuarter (sub, q) == qu'
-                   , s <- slotVars `over` sub
-                   , asSlot (sub, s) == slot'
-                   ]
-  where
-    fixed = filter isFixed ss
-    subs  = filter (not . isFixed) ss
-
-{-
--- | 固定科目は同一学年の全科目割当て不可
-rest2 :: [Subject] -> BoolForm
-rest2 ss = (-&&&-) [ (if elem q' [Q1, Q3] then toBF q else neg q) -|- neg s
-                   | sub <- subs
-                   , (y', q', d', h') <- map (\(subjectNumber -> Right e) -> e) fixed
-                   , seasonOfSubject sub == seasonOf q'
-                   , yearOfSubject sub == y'
-                   , q <- varsForDoubleQuarter `over` sub
-                   , s <- varsForSlot `over` sub
-                   , (dowOf <$> as_Slot s) == Just d'
-                   , (hourOf <$> as_Slot s) == Just h'
-                   ]
-  where
-    fixed = filter isFixed ss
-    subs  = filter (not . isFixed) ss
--}
-
 -- | 全てのSubjectの割当ては単一であること
 cond1 ss = (-&&&-) [ neg s1 -|- neg s2
                    | sub <- subs
@@ -78,28 +38,42 @@ cond1 ss = (-&&&-) [ neg s1 -|- neg s2
   where
     subs  = filter (not . isFixed) ss
 
-{-
--- | 第2学年は月火がだめ、第4学年は月がだめ
-cond2 ss = (-&&&-) [ neg s
+
+-- | 講師は同一時間帯は持てない
+cond2 :: [Subject] -> BoolForm
+cond2 ss = (-&&&-) [ sub' <!> sub
                    | sub <- subs
-                   , elem (target sub) [B2A, B2B]
-                   , s <- varsForSlot `over` sub
-                   , elem (as_Slot s) [Just s | s <- [Mo1 .. Tu5]]
+                   , lecturer <- lecturersOf sub
+                   , sub' <- filter (elem lecturer . lecturersOf) subs
+                   , sub < sub'
                    ]
-           -&-
-           (-&&&-) [ neg s -&- neg q
+           -&-                  -- 固定科目との整合性
+           (-&&&-) [ anotherQuarterBool sub sub' -|- neg s
                    | sub <- subs
-                   , elem (target sub) [B4A]
-                   , q <- varsForDoubleQuarter `over` sub
-                   , s <- varsForSlot `over` sub
-                   , elem (as_Slot s) [Just s | s <- [Mo1 .. Mo5]]
+                   , lect <- lecturersOf sub
+                   , sub'@(subjectNumber -> Right (_, _, slot')) <- filter (elem lect . lecturersOf) fixed
+                   , s <- slotVars `over` sub
+                   , asSlot (sub, s) == slot'
                    ]
   where
+    fixed = filter isFixed ss
     subs  = filter (not . isFixed) ss
--}
+
+-- | 固定科目は同一学年の全科目割当て不可
+cond3 :: [Subject] -> BoolForm
+cond3 ss = (-&&&-) [ anotherQuarterBool sub sub' -|- neg s
+                   | sub <- subs
+                   , sub' <- fixed
+                   , let Right (y', _, s') = subjectNumber sub'
+                   , s <- slotVars `over` sub
+                   , (asYear sub, asSlot (sub, s)) == (y', s') -- 学年とスロットが同じならあとはクォーターの検査
+                   ]
+  where
+    fixed = filter isFixed ss
+    subs  = filter (not . isFixed) ss
 
 -- | 同学年内では同じ割当てが2回出現することはない
-cond3 ss = (-&&&-) [ sub <!> sub'
+cond4 ss = (-&&&-) [ sub <!> sub'
                    | sub  <- subs
                    , sub' <- subs
                    , asYear sub == asYear sub'
@@ -108,21 +82,21 @@ cond3 ss = (-&&&-) [ sub <!> sub'
   where
     subs  = filter (not . isFixed) ss
 
-{-
 -- | nコマの科目は次の連続する(n-1)コマが存在するコマでなければならない
-cond4 ss = (-&&&-) [ neg s
+cond5 ss = (-&&&-) [ neg s
                    | sub <- filter ((Nothing /=) . isLong) subs
-                   , s <- varsForSlot `over` sub
+                   , s <- slotVars `over` sub
                    , case isLong sub of
-                     Just 2 -> (succSlot =<< as_Slot s) == Nothing
-                     Just 3 -> (succSlot =<< succSlot =<< as_Slot s) == Nothing
+                     Just 2 -> succSlot (asSlot (sub, s)) == Nothing
+                     Just 3 -> (succSlot =<< succSlot (asSlot (sub, s))) == Nothing
                      _ -> False
                    ]
   where
     subs  = filter (not . isFixed) ss
 
+{-
 -- | nコマの科目はそれらのコマにも同学年の他の科目が入ってはいけない
-cond5 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
+cond6 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
                    | sub <- filter ((Nothing /=) . isLong) subs
                    , q <- varsForDoubleQuarter `over` sub
                    , s <- varsForSlot `over` sub
@@ -140,7 +114,7 @@ cond5 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
     subs  = filter (not . isFixed) ss
 
 -- | 前件科目のチェック
-cond6 ss = (-&&&-) [ neg q' -&- q
+cond7 ss = (-&&&-) [ neg q' -&- q
                    | sub <- filter (([] /=) . preqsOf) subs
                    , sub' <- map (fromName subs) (preqsOf sub)
                    , q <- varsForDoubleQuarter `over` sub
@@ -158,7 +132,7 @@ cond6 ss = (-&&&-) [ neg q' -&- q
     subs  = filter (not . isFixed) ss
 
 -- | 同時開講科目のチェック
-cond7 ss = (-&&&-) [ q -=- (q `on` sub')
+cond8 ss = (-&&&-) [ q -=- (q `on` sub')
                    | sub <- filter (([] /=) . sameWith) subs
                    , sub' <- map (fromName subs) (sameWith sub)
                    , sub /= sub'
@@ -168,7 +142,7 @@ cond7 ss = (-&&&-) [ q -=- (q `on` sub')
     subs  = filter (not . isFixed) ss
 
 -- | 演習室はひとつしかない
-cond8 ss = (-&&&-) [ sub' <!> sub
+cond9 ss = (-&&&-) [ sub' <!> sub
                    | sub <- filter atComputerRoom subs
                    , sub' <- filter atComputerRoom subs
                    , sub' < sub
@@ -213,8 +187,28 @@ cond8 ss = (-&&&-) [ sub' <!> sub
     subs  = filter (not . isFixed) ss
     fixed = filter isFixed ss
 
+{-
+-- | 第2学年は月火がだめ、第4学年は月がだめ
+cond10 ss = (-&&&-) [ neg s
+                   | sub <- subs
+                   , elem (target sub) [B2A, B2B]
+                   , s <- varsForSlot `over` sub
+                   , elem (as_Slot s) [Just s | s <- [Mo1 .. Tu5]]
+                   ]
+           -&-
+           (-&&&-) [ neg s -&- neg q
+                   | sub <- subs
+                   , elem (target sub) [B4A]
+                   , q <- varsForDoubleQuarter `over` sub
+                   , s <- varsForSlot `over` sub
+                   , elem (as_Slot s) [Just s | s <- [Mo1 .. Mo5]]
+                   ]
+  where
+    subs  = filter (not . isFixed) ss
+-}
+
 -- | 3,4年の講義に関しては講師は1日に2つ講義を持たない
-cond9 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
+cond11 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
                    | sub <- subs
                    , elem (target sub) [B2A ..]
                    , lecturer <- lecturersOf sub
@@ -231,7 +225,7 @@ cond9 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
     subs  = filter (not . isFixed) ss
 
 -- | 第3学年DQ2に必修はいれない
-cond10 ss = (-&&&-) [ neg q
+cond12 ss = (-&&&-) [ neg q
                     | sub <- filter required subs
                     , target sub == B3A
                     , q <- varsForDoubleQuarter `over` sub
@@ -243,7 +237,7 @@ cond10 ss = (-&&&-) [ neg q
 -}
 
 defaultRules :: [[Subject] -> BoolForm]
-defaultRules = [rest1, cond1, cond3]
+defaultRules = [cond1, cond2, cond3, cond4, cond5]
 -- defaultRules = [rest1, rest2, cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8, cond9, cond10]
 
 checkConsistenry subjects

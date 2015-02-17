@@ -33,6 +33,7 @@ module Timetable.Types
        , asEntry
        , bitsForSubject
        , (<!>)
+       , anotherQuarterBool
        )
        where
 import Control.Applicative
@@ -174,9 +175,9 @@ instance LectureDate Subject where
 
 instance LectureDate (Subject, Int) where
   asSeason = asSeason . fst
-  asQuarter (s, i)
-    | asSeason s == Spring = toEnum $ indexFromVar i
-    | asSeason s == Autumn = toEnum $ 2 + indexFromVar i
+  asQuarter (s, i) = error "our coding system can't hold the quater information"
+--    | asSeason s == Spring = toEnum $ indexFromVar i
+--    | asSeason s == Autumn = toEnum $ 2 + indexFromVar i
 
 class LectureHour a where
   asSlot :: a -> Slot
@@ -275,15 +276,6 @@ fromName subjects l
 
 splitBySeason l = (renumber $ filter ((Spring ==) . asSeason) l, renumber $ filter ((Autumn ==) . asSeason) l)
 
--- | imcompatible relation
-(<!>) :: Subject -> Subject -> BoolForm
-s1 <!> s2 = (-&&&-) [ (q -!- (q `on` s2)) -|- neg s -|- neg (s `on` s2)
-                    | q <- quarterVars `over` s1
-                    , s <- slotVars `over` s1
-                    , asSeason s1 == asSeason s2
-                    , s1 /= s2  -- for fail-safe
-                    ]
-
 {-
 toSlot :: DoW -> Hour -> Slot
 toSlot Mon (fromEnum -> n) = [Mo1 .. ] !! n
@@ -317,3 +309,24 @@ asEntry (s, l)
     ss = slotVars `over` s
     numQ = 1
 
+-- | imcompatible relation
+(<!>) :: Subject -> Subject -> BoolForm
+s1 <!> s2 = (-&&&-) [ (q -!- (q `on` s2)) -|- neg s -|- neg (s `on` s2)
+                    | q <- quarterVars `over` s1
+                    , s <- slotVars `over` s1
+                    , asSeason s1 == asSeason s2
+                    , s1 /= s2  -- for fail-safe
+                    ]
+
+anotherQuarterBool :: Subject -> Subject -> BoolForm
+anotherQuarterBool s s'
+  | Right e <- subjectNumber s = case asQuarter s of -- もし固定科目ならその反対
+    Q1 -> neg j
+    Q2 -> toBF j
+    Q3 -> neg j
+    Q4 -> toBF j
+  | asSeason s == asSeason s' = i -!- j         -- そうでなく季節が同じなら変数間制約
+  | otherwise = toBF True                       -- 季節が違う場合は無視
+  where
+    i = head $ quarterVars `over` s
+    j = head $ quarterVars `over` s'
