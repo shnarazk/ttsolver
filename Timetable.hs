@@ -240,110 +240,98 @@ runSolver dataName mkrule subjects = do
   unless (checkConsistenry subjectsInAutomn) $ error "exit"
   let (r1, r2) = (mkrule subjectsInSpring, mkrule subjectsInAutomn)
   let
-    seasonIs season sub = season == asSeason sub
-  let
-    assignTable :: Season -> [Subject] -> [Int] -> TimeTable
-    assignTable season subs ans = table
+    assignTable :: [Subject] -> [Int] -> TimeTable
+    assignTable subs ans = table
       where
         x = filter (0 <) . (take (length subs * bitsForSubject)) $ ans
         comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
         table = sortBy comp $ map (\s -> (asEntry (s, x), s)) subs
   let
-    printer :: Season -> [Subject] -> [Int] -> IO ()
-    printer season subs ans = do
+    printer :: [Subject] -> [Int] -> IO ()
+    printer subs ans = do
         forM_ [Y1 .. Y4] $ \y -> do
           putStrLn $ "### " ++ show y
-          forM_ (assignTable season subs ans) $ \(e, s) -> do
+          forM_ (assignTable subs ans) $ \(e, s) -> do
             when (asYear e == y) $ do
               putStr $ printf "%s: %-24s" (show (asSlot e)) (labelOf s)
               putStrLn . ("\t" ++) . intercalate ", " $ lecturersOf s
-  let
-    makeTable :: Season -> [Subject] -> [Int] -> IO ()
-    makeTable season subs ans = do
-        let h = if season == Spring then "timetable-spring.tex" else "timetable-automn.tex"
-        -- toLatexTable p table
-        putStrLn "" -- withFile h WriteMode $ toLatex dataName season (assignTable season subs ans)
   case os of
     ("-i":_) | elem "B" os -> do
-      printer Autumn subjectsInAutomn . read =<< getContents
+      printer subjectsInAutomn . read =<< getContents
     ("-i":_) -> do
-      printer Spring subjectsInSpring . read =<< getContents
+      printer subjectsInSpring . read =<< getContents
     ("-d":_) -> do
       putStrLn . asCNFString $ if elem "B" os then r2 else r1
     _ -> do
-      let anss = map (SAT.satisfiable (:) . asList) [r1, r2]
-      forM_ (zip3 [Spring, Autumn] anss [subjectsInSpring, subjectsInAutomn]) $ \(season, res, subs) -> do
-        putStr $ "-------- " ++ if season == Spring then "春学期" else "秋学期"
-        let bf = if season == Spring then r1 else r2
-        putStrLn $ "; " ++ show (numberOfVariables bf, numberOfClauses bf)
-        case res of
-          [] -> putStrLn "can't solve"
-          (r:_) -> printer season subs r -- >> makeTable (season :: Season) subs r
-      when (not (null (anss !! 0)) && not (null (anss !! 0))) $ do
-        let fulltable = concat [ assignTable s sub (head ans)
-                               | s <- [Spring, Autumn]
-                               | sub <- [subjectsInSpring, subjectsInAutomn]
-                               | ans <- anss
-                               ]
-        dumpReport fulltable      -- summary report
+      case map (SAT.satisfiable (:) . asList) [r1, r2] of
+        [[], _] -> putStrLn "can't solve Spring constraints"
+        [_, []] -> putStrLn "can't solve Autumn constraints"
+        [s:_, a:_] -> do
+          let table = concat [ assignTable sub ans
+                             | sub <- [subjectsInSpring, subjectsInAutomn]
+                             | ans <- [s, a]
+                             ]
+          forM_ [(Spring, subjectsInSpring, r1, s), (Autumn, subjectsInAutomn, r2, a)] $ \(ssn, subs, cnf, ans) -> do 
+            putStr $ "-------- " ++ if ssn == Spring then "春学期" else "秋学期"
+            putStrLn $ "; " ++ show (numberOfVariables cnf, numberOfClauses cnf)
+            printer subs ans
+          -- toLatexTable p table
+          withFile "timetable-assign.tex" WriteMode $ toLatex dataName table
+          dumpReport table      -- summary report
 
-{-
-toLatex :: String -> Season -> TimeTable -> Handle -> IO ()
-toLatex dataName season table h = do
-  when (season == Spring) (hPutStrLn h . printf "\\newcommand{\\versionID}{%s (%s)}" dataName =<< currentTimeString)
-  forM_ tags $ \(k@(_, q, _, _), s) -> do
-    let dq = if elem q [Q1, Q3] then DQ1 else DQ2
-    case find ((k ==) . fst) table of
+toLatex :: String -> TimeTable -> Handle -> IO ()
+toLatex dataName table h = do
+  hPutStrLn h . printf "\\newcommand{\\versionID}{%s (%s)}" dataName =<< currentTimeString
+  forM_ tags $ \(e@(y, q, s), k) -> do -- TimeTable == [((Year, Quarter, Slot), Subject)]
+    let firstHalf = elem q [Q1, Q3]
+    case find ((e ==) . fst) table of
       Just (_, sub) -> do
         let name = labelOf sub
         let lecs' = intercalate "," $ lecturersOf sub
         let lecs = if 5 < length lecs' then "\\tiny " ++ lecs' else lecs'
         case (required sub, atComputerRoom sub) of
-          (True , True ) -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{blue!10}\\textcolor{red}{\\textbf{%s}}}" p s name
-          (True , False) | dq == DQ1 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\textcolor{red}{\\textbf{%s}}}" p s name
-          (True , False) | dq == DQ2 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}\\textcolor{red}{\\textbf{%s}}}" p s name
-          (False, True ) -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{blue!10}%s}" p s name
-          (False, False) | dq == DQ1 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{%s}" p s name
-          (False, False) | dq == DQ2 -> hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}%s}" p s name
+          (True , True) -> hPutStr h $ printf "\\newcommand{\\%sSub}{\\cellcolor{blue!10}\\textcolor{red}{\\textbf{%s}}}" k name
+          (True , False) | firstHalf -> hPutStr h $ printf "\\newcommand{\\%sSub}{\\textcolor{red}{\\textbf{%s}}}" k name
+          (True , False) | not firstHalf -> hPutStr h $ printf "\\newcommand{\\%sSub}{\\cellcolor{black!5}\\textcolor{red}{\\textbf{%s}}}" k name
+          (False, True) -> hPutStr h $ printf "\\newcommand{\\%sSub}{\\cellcolor{blue!10}%s}" k name
+          (False, False) | firstHalf -> hPutStr h $ printf "\\newcommand{\\%sSub}{%s}" k name
+          (False, False) | not firstHalf -> hPutStr h $ printf "\\newcommand{\\%sSub}{\\cellcolor{black!5}%s}" k name
           _ -> putStrLn $ "unhandled pattern: " ++ show (labelOf sub) ++ " @ " ++ show q
-        if dq == DQ1
-          then hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\footnotesize %s}" p s lecs
-          else hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}\\footnotesize %s}" p s lecs
-      _ | follwingCell k -> do
-        hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{blue!10}\\hfil↑\\hfil}" p s
-        if dq == DQ1
-          then hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{}" p s
-          else hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}}" p s
-      _ | dq == DQ1 -> do
-        hPutStr h $ printf "\\newcommand{\\%s%sSub}{}" p s
-        hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{}" p s
+        if firstHalf
+          then hPutStrLn h $ printf "\\newcommand{\\%sLec}{\\footnotesize %s}" k lecs
+          else hPutStrLn h $ printf "\\newcommand{\\%sLec}{\\cellcolor{black!5}\\footnotesize %s}" k lecs
+      _ | follwingCell e -> do
+        hPutStr h $ printf "\\newcommand{\\%sSub}{\\cellcolor{blue!10}\\hfil↑\\hfil}" k
+        if firstHalf
+          then hPutStrLn h $ printf "\\newcommand{\\%sLec}{}" k
+          else hPutStrLn h $ printf "\\newcommand{\\%sLec}{\\cellcolor{black!5}}" k
+      _ | firstHalf -> do
+        hPutStr h $ printf "\\newcommand{\\%sSub}{}" k
+        hPutStrLn h $ printf "\\newcommand{\\%sLec}{}" k
       _ -> do
-        hPutStr h $ printf "\\newcommand{\\%s%sSub}{\\cellcolor{black!5}}" p s
-        hPutStrLn h $ printf "\\newcommand{\\%s%sLec}{\\cellcolor{black!5}}" p s
+        hPutStr h $ printf "\\newcommand{\\%sSub}{\\cellcolor{black!5}}" k
+        hPutStrLn h $ printf "\\newcommand{\\%sLec}{\\cellcolor{black!5}}" k
   where
-    follwingCell (y, q, d, h)
-      | elem h [H1, H3] = False
+    follwingCell (y, q, s@(Slot d h))
+      | elem (asHour s) [H1, H3] = False
       | Just (_, sub) <- find ((k' ==) . fst) table = Nothing /= isLong sub && atComputerRoom sub
-      | elem h [H2, H4] = False
+      | elem (asHour s) [H2, H4] = False
       | Just (_, sub) <- find ((k'' ==) . fst) table = Just 3 == isLong sub  && atComputerRoom sub
       | otherwise = False
       where
-        k' = (y, q, d, pred h)
-        k'' = (y, q, d, pred (pred h))
-    p :: String
-    p = if season == Spring then "Sp" else "Au"
-    tags = [ ( (y, q, d, h)
-             , (printf "%s%s%s%s" (yp y) (qp q) (show d) (hp h)) :: String)
+        k' = (y, q, Slot d (pred h))
+        k'' = (y, q, Slot d (pred (pred h)))
+    tags = [ ( (y, q, Slot d h) , (printf "%s%s%s%s" (yp y) (qp q) (show d) (hp h)) :: String)
            | y <- [minBound :: Year .. maxBound]
            , q <- [minBound :: Quarter .. maxBound]
            , d <- [minBound :: DoW .. maxBound]
            , h <- [minBound :: Hour .. maxBound]
            ]
     yp :: Year -> String
-    yp Y1 = "One"
-    yp Y2 = "Two"
-    yp Y3 = "Thr"
-    yp Y4 = "Fou"
+    yp Y1 = "Yone"
+    yp Y2 = "Ytwo"
+    yp Y3 = "Ythr"
+    yp Y4 = "Yfou"
     qp :: Quarter -> String
     qp Q1 = "Qone"
     qp Q2 = "Qtwo"
@@ -356,15 +344,15 @@ toLatex dataName season table h = do
     hp H4 = "Fou"
     hp H5 = "Fiv"
 
-toLatexTable :: String -> [(Subject, Entry, (String, [String]))] -> IO ()
-toLatexTable p _ = do
+toLatexTable :: String -> IO ()
+toLatexTable p = do
   forM_ (allItems :: [DoW]) $ \d -> do
     forM_ (allItems :: [Hour]) $ \s -> do
       putStr $ "&" ++ show (fromEnum s + 1) ++ "&"
       forM_ (allItems :: [Year]) $ \y -> do
         forM_ (allItems :: [Quarter]) $ \q -> do
-          putStr ((printf "\\%s%s%s%s%sSub&" p (show y) (show q) (show d) (show s)) :: String)
-          putStr ((printf "\\%s%s%s%s%sLec" p (show y) (show q) (show d) (show s)) :: String)
+          putStr ((printf "\\%s%s%s%sSub&" (show y) (show q) (show d) (show s)) :: String)
+          putStr ((printf "\\%s%s%s%sLec" (show y) (show q) (show d) (show s)) :: String)
           if q == maxBound && y == Y1 then putStrLn "\\\\\\hline" else putStr "&"
 
 currentTimeString :: IO String
@@ -372,9 +360,6 @@ currentTimeString = do
   t <- utcToLocalTime <$> (getTimeZone =<< getCurrentTime) <*> getCurrentTime
   return $ formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" t
 
-tableOfFixed :: [Subject] -> TimeTable
-tableOfFixed l = map (\s@(subjectNumber -> Right e) -> (e, s)) $ filter isFixed l
--}
 dumpReport :: TimeTable -> IO ()
 dumpReport table = do
   putStrLn "### load summary"

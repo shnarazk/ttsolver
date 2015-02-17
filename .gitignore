@@ -6,6 +6,7 @@ dist
 *.aux
 timetable-automn.tex
 timetable-spring.tex
+timetable-assign.tex
 timetable.pdf
 main
 *.pdf
