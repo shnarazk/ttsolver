@@ -59,7 +59,14 @@ dateBits = 1
 
 data DoW = Mon | Tue | Wed | Thu | Fri deriving (Bounded, Enum, Eq, Ord, Show)
 data Hour = H1 | H2 | H3 | H4 | H5 deriving (Bounded, Enum, Eq, Ord, Show)
-data Slot = Slot DoW Hour deriving (Eq, Ord, Show)
+data Slot = Slot DoW Hour deriving (Eq, Ord)
+
+instance Show Slot where
+  show (Slot Mon h) = "月" ++ show (fromEnum h + 1)
+  show (Slot Tue h) = "火" ++ show (fromEnum h + 1)
+  show (Slot Wed h) = "水" ++ show (fromEnum h + 1)
+  show (Slot Thu h) = "木" ++ show (fromEnum h + 1)
+  show (Slot Fri h) = "金" ++ show (fromEnum h + 1)
 
 validSlot = [ Slot d h
             | d <- [Mon .. Fri]
@@ -203,9 +210,9 @@ isFixed (subjectNumber -> Right _) = True
 type TimeTable = [(Entry, Subject)]
 
 data Sub
-  = Sub    String (Year, Season)  Bool [String] (Maybe Int) [String] [String] Bool
-  | Fixed  String Entry           Bool [String] (Maybe Int) [String] [String] Bool
-  | FixedQ String (Year, Quarter) Bool [String] (Maybe Int) [String] [String] Bool
+  = Sub    String (Year, Season)             Bool [String] (Maybe Int) [String] [String] Bool
+  | Fixed  String (Year, Quarter, DoW, Hour) Bool [String] (Maybe Int) [String] [String] Bool
+  | FixedQ String (Year, Quarter)            Bool [String] (Maybe Int) [String] [String] Bool
 
 canonize :: [Sub] -> [Subject]
 canonize = renumber . concatMap unfoldSubject
@@ -218,7 +225,8 @@ renumber l = loop l 1
     loop (sub@(isFixed -> False):l) n = sub { subjectNumber = Left n } : loop l (n + 1)
 
 unfoldSubject :: Sub -> [Subject]
-unfoldSubject sub@(Fixed la e re ls is pr sa at) = [Subject la (TargetFixed e) re ls is pr sa at (Right e)]
+unfoldSubject sub@(Fixed la (y,q,d,h) re ls is pr sa at) = [Subject la (TargetFixed e) re ls is pr sa at (Right e)]
+  where e = (y, q, Slot d h)
 unfoldSubject sub@(FixedQ la (y, q) re ls is pr sa at) = [Subject la (TargetQuarter y q) re ls is pr sa at (Left 0)]
 unfoldSubject sub@(Sub la (y, s) re ls is pr sa at)
   -- 科目名が'で終わると同時開講
@@ -301,7 +309,7 @@ asEntry (s, l)
     [] | asSeason s == Autumn    -> (asYear s, Q3, asSlot (s, (head s')))
     (x:_) | asSeason s == Spring -> (asYear s, Q2, asSlot (s, (head s')))
     (x:_) | asSeason s == Autumn -> (asYear s, Q4, asSlot (s, (head s')))
-  | otherwise = error $ "strange assignment: " ++ show (labelOf s , (q', s'))
+  | otherwise = error $ "strange assignment: " ++ labelOf s ++ show (q', map (\i -> asSlot (s, i)) s')
   where
     q' = filter (flip elem qs) l
     s' = filter (flip elem ss) l
