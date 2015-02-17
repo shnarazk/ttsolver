@@ -276,24 +276,6 @@ fromName subjects l
   | Just x <- find ((l ==) . labelOf) subjects = x
   | otherwise = error ""
 
-splitBySeason l = (renumber $ filter ((Spring ==) . asSeason) l, renumber $ filter ((Autumn ==) . asSeason) l)
-
-{-
-toSlot :: DoW -> Hour -> Slot
-toSlot Mon (fromEnum -> n) = [Mo1 .. ] !! n
-toSlot Tue (fromEnum -> n) = [Tu1 .. ] !! n
-toSlot Wed (fromEnum -> n) = [We1 .. ] !! n
-toSlot Thu (fromEnum -> n) = [Th1 .. ] !! n
-toSlot Fri (fromEnum -> n) = [Fr1 .. ] !! n
-
-slotOfEntry :: Entry -> Slot
-slotOfEntry (_, _, Mon, h) = [Mo1 ..] !! fromEnum h
-slotOfEntry (_, _, Tue, h) = [Tu1 ..] !! fromEnum h
-slotOfEntry (_, _, Wed, h) = [We1 ..] !! fromEnum h
-slotOfEntry (_, _, Thu, h) = [Th1 ..] !! fromEnum h
-slotOfEntry (_, _, Fri, h) = [Fr1 ..] !! fromEnum h
--}
-
 asEntry :: (Subject, [Int]) -> Entry
 asEntry (fst -> subjectNumber -> Right e) = e
 asEntry (s, l)
