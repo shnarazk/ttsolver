@@ -7,3 +7,5 @@ dist
 timetable-automn.tex
 timetable-spring.tex
 timetable.pdf
+main
+*.pdf
