@@ -2,7 +2,7 @@
 -- see http://haskell.org/cabal/users-guide/
 
 name:                ttsolver
-version:             0.2.2.0
+version:             0.3.0.0
 synopsis:           SAT-based timetable generator
 description:      This is a private project
 license:             GPL-3

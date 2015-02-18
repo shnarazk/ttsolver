@@ -2,7 +2,6 @@
 {-# LANGUAGE ParallelListComp #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE OverloadedStrings #-}
-{-- -# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE FlexibleInstances #-}
 
 module Timetable.Types
@@ -101,6 +100,9 @@ data Target
   = TargetSeason Year Season
   | TargetQuarter Year Quarter
   | TargetFixed Entry
+  | S Year Season
+  | Q Year Quarter
+  | F Year Quarter DoW Hour
     deriving (Eq, Ord, Show)
 
 data Subject = Subject
@@ -212,27 +214,8 @@ isFixed (subjectNumber -> Right _) = True
 
 type TimeTable = [(Entry, Subject)]
 
-class TargetForInput a where
-  toTarget :: a -> Target
-  targetKind :: a -> Int
-
-instance TargetForInput (Year, Season) where
-  toTarget (y, s) = TargetSeason y s
-  targetKind _ = 1
-
-instance TargetForInput (Year, Quarter) where
-  toTarget (y, q) = TargetQuarter y q
-  targetKind _ = 2
-
-instance TargetForInput (Year, Quarter, DoW, Hour) where
-  toTarget (y, q, d, h) = TargetFixed (y, q, Slot d h)
-  targetKind _ = 3
-
 data Sub
---  = Sub  String (forall a . TargetForInput a => a) Bool [String] (Maybe Int) [String] [String] Bool
-  = Sub  String (Year, Season)             Bool [String] (Maybe Int) [String] [String] Bool
-  | SubF String (Year, Quarter, DoW, Hour) Bool [String] (Maybe Int) [String] [String] Bool
-  | SubQ String (Year, Quarter)            Bool [String] (Maybe Int) [String] [String] Bool
+  = Sub String Target Bool [String] (Maybe Int) [String] [String] Bool
 
 canonize :: [Sub] -> [Subject]
 canonize = renumber . concatMap unfoldSubject
@@ -244,20 +227,11 @@ renumber l = loop l 1
     loop (sub@(isFixed -> True):l)  n = sub                            : loop l n
     loop (sub@(isFixed -> False):l) n = sub { subjectNumber = Left n } : loop l (n + 1)
 
-{-
-unfoldSubject :: Sub -> [Subject]
-unfoldSubject sub@(Sub la t re ls is pr sa at)
-  | kind == 1 = let (TargetFixed e') = e in [Subject la e re ls is pr sa at (Right e')]
-  | kind == 2 = [Subject la e re ls is pr sa at (Left 0)]
-  where
-    kind = targetKind (t :: forall a . TargetForInput a => a)
-    e = toTarget (t :: forall a . TargetForInput a => a)
--}
-
-unfoldSubject sub@(SubF la (y, q, d, h) re ls is pr sa at) = [Subject la (TargetFixed e) re ls is pr sa at (Right e)]
+unfoldSubject sub@(Sub la (F y q d h) re ls is pr sa at)
+  = [Subject la (TargetFixed e) re ls is pr sa at (Right e)]
   where
     e = (y, q, Slot d h)
-unfoldSubject sub@(SubQ la (y, q) re ls is pr sa at)
+unfoldSubject sub@(Sub la (Q y q) re ls is pr sa at)
   -- 科目名が'で終わると同時開講
   | lc == '\''  = [Subject namep ta re ls is pr sa at z, Subject nameq ta re ls is pr [namep] at z]
   -- 科目名が*で終わると2クォーター開講
@@ -274,7 +248,7 @@ unfoldSubject sub@(SubQ la (y, q) re ls is pr sa at)
       nameq = init la ++ "''"
       name = init la
       lc = last la
-unfoldSubject sub@(Sub la (y, s) re ls is pr sa at)
+unfoldSubject sub@(Sub la (S y s) re ls is pr sa at)
   -- 科目名が'で終わると同時開講
   | lc == '\''  = [Subject namep ta re ls is pr sa at z, Subject nameq ta re ls is pr [namep] at z]
   -- 科目名が*で終わると2クォーター開講
@@ -291,6 +265,7 @@ unfoldSubject sub@(Sub la (y, s) re ls is pr sa at)
       nameq = init la ++ "''"
       name = init la
       lc = last la
+unfoldSubject _ = error "please use one of F, S or Q"
 
 quarterVars :: Subject -> (Int, Int)
 quarterVars s@(subjectNumber -> Right _) = error $ "quarterVars on fixed lecture:"  ++ labelOf s
