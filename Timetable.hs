@@ -52,7 +52,7 @@ cond2 ss = (-&&&-) [ sub' <!> sub
                    , lect <- lecturersOf sub
                    , sub'@(subjectNumber -> Right (_, _, slot')) <- filter (elem lect . lecturersOf) fixed
                    , s <- slotVars `over` sub
-                   , asSlot (sub, s) == slot'
+                   , shareSlot (sub, (sub, s)) (sub', slot')
                    ]
   where
     fixed = filter isFixed ss
@@ -71,8 +71,18 @@ cond3 ss = (-&&&-) [ anotherQuarterBool sub sub' -|- neg s
     fixed = filter isFixed ss
     subs  = filter (not . isFixed) ss
 
+-- | クォーター固定科目の処理
+cond4 ss = (-&&&-) [ if elem (asQuarter sub) [Q1, Q3] then neg q else toBF q
+                   | sub <- filter isSubQ ss
+                   , q <- quarterVars `over` sub
+                   ]
+  where
+    isSubQ sub
+      | TargetQuarter _ _ <- target sub = True
+      | otherwise = False
+
 -- | 同学年内では同じ割当てが2回出現することはない
-cond4 ss = (-&&&-) [ sub <!> sub'
+cond5 ss = (-&&&-) [ sub <!> sub'
                    | sub  <- subs
                    , sub' <- subs
                    , asYear sub == asYear sub'
@@ -82,7 +92,7 @@ cond4 ss = (-&&&-) [ sub <!> sub'
     subs  = filter (not . isFixed) ss
 
 -- | nコマの科目は次の連続する(n-1)コマが存在するコマでなければならない
-cond5 ss = (-&&&-) [ neg s
+cond6 ss = (-&&&-) [ neg s
                    | sub <- filter ((Nothing /=) . isLong) subs
                    , s <- slotVars `over` sub
                    , case isLong sub of
@@ -94,7 +104,7 @@ cond5 ss = (-&&&-) [ neg s
     subs  = filter (not . isFixed) ss
 
 -- | nコマの科目はそれらのコマにも同学年の他の科目が入ってはいけない
-cond6 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
+cond7 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
                    | sub <- filter ((Nothing /=) . isLong) subs
                    , q <- quarterVars `over` sub
                    , s <- slotVars `over` sub
@@ -103,13 +113,25 @@ cond6 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
                    , asYear sub == asYear sub'
                    , asSeason sub == asSeason sub'
                    , s' <- slotVars `over` sub'
-                   , shareSlot sub (sub, s) (sub', s')
+                   , shareSlot (sub, (sub, s)) (sub', (sub', s'))
+                   ]
+           -&-
+           (-&&&-) [ anotherQuarterBool sub sub' -|- neg s'
+                   | sub <- filter ((Nothing /=) . isLong) fixed
+                   , let (Right e) = subjectNumber sub
+                   , sub' <- subs
+                   , asYear e == asYear sub'
+                   , asSeason e == asSeason sub'
+                   , s' <- slotVars `over` sub'
+                   , shareSlot (sub, asSlot e) (sub', (sub', s'))
                    ]
   where
+    fixed  = filter isFixed ss
     subs  = filter (not . isFixed) ss
 
+
 -- | 前件科目のチェック
-cond7 ss = (-&&&-) [ neg q' -&- q
+cond8 ss = (-&&&-) [ neg q' -&- q
                    | sub <- filter (([] /=) . preqsOf) subs
                    , sub' <-filter (not . isFixed) $  map (fromName subs) (preqsOf sub)
                    , q <- quarterVars `over` sub
@@ -127,7 +149,7 @@ cond7 ss = (-&&&-) [ neg q' -&- q
     subs  = filter (not . isFixed) ss
 
 -- | 同時開講科目のチェック
-cond8 ss = (-&&&-) [ q -=- (q `on` sub')
+cond9 ss = (-&&&-) [ q -=- (q `on` sub')
                    | sub <- filter (([] /=) . sameWith) subs
                    , sub' <- map (fromName subs) (sameWith sub)
                    , sub /= sub'
@@ -137,30 +159,30 @@ cond8 ss = (-&&&-) [ q -=- (q `on` sub')
     subs  = filter (not . isFixed) ss
 
 -- | 演習室はひとつしかない
-cond9 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
-                   | sub <- filter atComputerRoom subs
-                   , sub' <- filter atComputerRoom subs
-                   , sub' /= sub
-                   , q <- quarterVars `over` sub
-                   , s <- slotVars `over` sub
-                   , s' <- slotVars `over` sub'
-                   , shareSlot sub (sub, s) (sub', s')
-                   ]
-           -&-                  -- 固定科目で演習室を使う科目との整合性検査
-           (-&&&-) [ anotherQuarterBool sub sub' -|- neg s
-                   | sub <- filter atComputerRoom subs
-                   , sub' <- filter atComputerRoom fixed
-                   , let (Right (_, _', s')) = subjectNumber sub'
-                   , s <- slotVars `over` sub
-                   , shareSlot sub (sub, s) s'
-                   ]
+cond10 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
+                    | sub <- filter atComputerRoom subs
+                    , sub' <- filter atComputerRoom subs
+                    , sub' /= sub
+                    , q <- quarterVars `over` sub
+                    , s <- slotVars `over` sub
+                    , s' <- slotVars `over` sub'
+                    , shareSlot (sub, (sub, s)) (sub', (sub', s'))
+                    ]
+            -&-                  -- 固定科目で演習室を使う科目との整合性検査
+            (-&&&-) [ anotherQuarterBool sub sub' -|- neg s
+                    | sub <- filter atComputerRoom subs
+                    , sub' <- filter atComputerRoom fixed
+                    , let (Right (_, _', s')) = subjectNumber sub'
+                    , s <- slotVars `over` sub
+                    , shareSlot (sub, (sub, s)) (sub', s')
+                    ]
   where
     subs  = filter (not . isFixed) ss
     fixed = filter isFixed ss
 
 -- | 第2学年は月火がだめ、第4学年は月、第2Qがだめ
-cond10 ss = (-&&&-) [ neg s
-                    | sub <- filter ((Y1 ==) . asYear) subs
+cond11 ss = (-&&&-) [ neg s
+                    | sub <- filter ((Y2 ==) . asYear) subs
                     , s <- slotVars `over` sub
                     , elem (asDoW (sub, s)) [Mon, Tue]
                     ]
@@ -180,7 +202,7 @@ cond10 ss = (-&&&-) [ neg s
     subs  = filter (not . isFixed) ss
 
 -- | 3,4年の講義に関しては講師は1日に2つ講義を持たない
-cond11 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
+cond12 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
                    | sub <- filter ((Y2 <=) . asYear) subs
                    , lecturer <- lecturersOf sub
                    , sub' <- filter ((Y2 <=) . asYear) subs
@@ -195,7 +217,7 @@ cond11 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
     subs  = filter (not . isFixed) ss
 
 -- | 第3学年DQ2に必修はいれない
-cond12 ss = (-&&&-) [ neg q
+cond13 ss = (-&&&-) [ neg q
                     | sub <- subs
                     , asYear sub == Y3 && asSeason sub == Spring && required sub
                     , q <- quarterVars `over` sub
@@ -204,7 +226,7 @@ cond12 ss = (-&&&-) [ neg q
     subs  = filter (not . isFixed) ss
 
 defaultRules :: [[Subject] -> BoolForm]
-defaultRules = [cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8, cond9, cond10, cond11, cond12]
+defaultRules = [cond1, cond2, cond3, cond4, cond5, cond6, cond7, cond8, cond9, cond10, cond11, cond12, cond13]
 
 checkConsistenry subjects
   | [] /= invalidPreqs = error $ "`preqs` contains non-existing subject: " ++ head invalidPreqs
@@ -244,8 +266,8 @@ runSolver dataName mkrule subjects = do
     assignTable subs ans = table
       where
         x = filter (0 <) . (take (length subs * bitsForSubject)) $ ans
-        comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
-        table = sortBy comp $ map (\s -> (asEntry (s, x), s)) subs
+        -- comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
+        table = sort {- By comp -} $ map (\s -> (asEntry (s, x), s)) subs
   let
     printer :: [Subject] -> [Int] -> IO ()
     printer subs ans = do
@@ -253,7 +275,7 @@ runSolver dataName mkrule subjects = do
           putStrLn $ "### " ++ show y
           forM_ (assignTable subs ans) $ \(e, s) -> do
             when (asYear e == y) $ do
-              putStr $ printf "%s: %-24s" (show (asSlot e)) (labelOf s)
+              putStr $ printf "%s%s: %-24s" (show (asQuarter e)) (show (asSlot e)) (labelOf s)
               putStrLn . ("\t" ++) . intercalate ", " $ lecturersOf s
   case os of
     ("-i":_) | elem "B" os -> do
@@ -271,7 +293,7 @@ runSolver dataName mkrule subjects = do
                              | sub <- [subjectsInSpring, subjectsInAutomn]
                              | ans <- [s, a]
                              ]
-          forM_ [(Spring, subjectsInSpring, r1, s), (Autumn, subjectsInAutomn, r2, a)] $ \(ssn, subs, cnf, ans) -> do 
+          forM_ [(Spring, subjectsInSpring, r1, s), (Autumn, subjectsInAutomn, r2, a)] $ \(ssn, subs, cnf, ans) -> do
             putStr $ "-------- " ++ if ssn == Spring then "春学期" else "秋学期"
             putStrLn $ "; " ++ show (numberOfVariables cnf, numberOfClauses cnf)
             printer subs ans
@@ -371,4 +393,3 @@ dumpReport table = do
   where
     lects = sort . nub . concatMap (lecturersOf . snd) $ table
     gather key = filter (elem key . lecturersOf . snd) $ table
-

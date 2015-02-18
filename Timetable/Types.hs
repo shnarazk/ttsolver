@@ -106,7 +106,7 @@ data Target
 data Subject = Subject
                {
                  labelOf :: String -- ^ 科目名
-               , target :: Target  -- ^ 春/秋開講時期
+               , target :: Target  -- ^ 開講時期
                , required :: Bool  -- ^ 必修/選択
                , lecturersOf :: [String] -- ^ 担当教員群
                , isLong :: Maybe Int     -- ^ 連続コマの有無
@@ -212,10 +212,27 @@ isFixed (subjectNumber -> Right _) = True
 
 type TimeTable = [(Entry, Subject)]
 
+class TargetForInput a where
+  toTarget :: a -> Target
+  targetKind :: a -> Int
+
+instance TargetForInput (Year, Season) where
+  toTarget (y, s) = TargetSeason y s
+  targetKind _ = 1
+
+instance TargetForInput (Year, Quarter) where
+  toTarget (y, q) = TargetQuarter y q
+  targetKind _ = 2
+
+instance TargetForInput (Year, Quarter, DoW, Hour) where
+  toTarget (y, q, d, h) = TargetFixed (y, q, Slot d h)
+  targetKind _ = 3
+
 data Sub
-  = Sub    String (Year, Season)             Bool [String] (Maybe Int) [String] [String] Bool
-  | Fixed  String (Year, Quarter, DoW, Hour) Bool [String] (Maybe Int) [String] [String] Bool
-  | FixedQ String (Year, Quarter)            Bool [String] (Maybe Int) [String] [String] Bool
+--  = Sub  String (forall a . TargetForInput a => a) Bool [String] (Maybe Int) [String] [String] Bool
+  = Sub  String (Year, Season)             Bool [String] (Maybe Int) [String] [String] Bool
+  | SubF String (Year, Quarter, DoW, Hour) Bool [String] (Maybe Int) [String] [String] Bool
+  | SubQ String (Year, Quarter)            Bool [String] (Maybe Int) [String] [String] Bool
 
 canonize :: [Sub] -> [Subject]
 canonize = renumber . concatMap unfoldSubject
@@ -227,10 +244,36 @@ renumber l = loop l 1
     loop (sub@(isFixed -> True):l)  n = sub                            : loop l n
     loop (sub@(isFixed -> False):l) n = sub { subjectNumber = Left n } : loop l (n + 1)
 
+{-
 unfoldSubject :: Sub -> [Subject]
-unfoldSubject sub@(Fixed la (y,q,d,h) re ls is pr sa at) = [Subject la (TargetFixed e) re ls is pr sa at (Right e)]
-  where e = (y, q, Slot d h)
-unfoldSubject sub@(FixedQ la (y, q) re ls is pr sa at) = [Subject la (TargetQuarter y q) re ls is pr sa at (Left 0)]
+unfoldSubject sub@(Sub la t re ls is pr sa at)
+  | kind == 1 = let (TargetFixed e') = e in [Subject la e re ls is pr sa at (Right e')]
+  | kind == 2 = [Subject la e re ls is pr sa at (Left 0)]
+  where
+    kind = targetKind (t :: forall a . TargetForInput a => a)
+    e = toTarget (t :: forall a . TargetForInput a => a)
+-}
+
+unfoldSubject sub@(SubF la (y, q, d, h) re ls is pr sa at) = [Subject la (TargetFixed e) re ls is pr sa at (Right e)]
+  where
+    e = (y, q, Slot d h)
+unfoldSubject sub@(SubQ la (y, q) re ls is pr sa at)
+  -- 科目名が'で終わると同時開講
+  | lc == '\''  = [Subject namep ta re ls is pr sa at z, Subject nameq ta re ls is pr [namep] at z]
+  -- 科目名が*で終わると2クォーター開講
+  | lc == '+'   = [Subject name1 ta re ls is pr sa at z, Subject name2 ta re ls is [name1] sa at z]
+  -- 科目名が?で終わると2コマ必要
+  | lc == '?'   = [Subject name  ta re ls is pr sa at z, Subject (name ++ "?") ta re ls is pr sa at z]
+  | otherwise   = [Subject la ta re ls is pr sa at z]
+    where
+      ta = TargetQuarter y q
+      z = Left 0
+      name1 = init la ++ "→"
+      name2 = "→" ++ init la
+      namep = init la ++ "'"
+      nameq = init la ++ "''"
+      name = init la
+      lc = last la
 unfoldSubject sub@(Sub la (y, s) re ls is pr sa at)
   -- 科目名が'で終わると同時開講
   | lc == '\''  = [Subject namep ta re ls is pr sa at z, Subject nameq ta re ls is pr [namep] at z]
@@ -307,25 +350,29 @@ s1 <!> s2
 anotherQuarterBool :: Subject -> Subject -> BoolForm
 anotherQuarterBool s s'
   | isFixed s && isFixed s' = error $ "anotherQuarterBool accepts fixed lectures: " ++ labelOf s ++ " and " ++ labelOf s'
-  | Right e <- subjectNumber s = case asQuarter s of -- もし固定科目ならその反対
-    Q1 -> neg j
-    Q2 -> toBF j
-    Q3 -> neg j
-    Q4 -> toBF j
-  | Right e <- subjectNumber s' = case asQuarter s' of -- もし固定科目ならその反対
-    Q1 -> neg i
-    Q2 -> toBF i
-    Q3 -> neg i
-    Q4 -> toBF i
+  | Right _ <- subjectNumber s = case asQuarter s of -- もし固定科目ならその反対
+    Q1 -> toBF j
+    Q2 -> neg j
+    Q3 -> toBF j
+    Q4 -> neg j
+  | Right _ <- subjectNumber s' = case asQuarter s' of -- もし固定科目ならその反対
+    Q1 -> toBF i
+    Q2 -> neg i
+    Q3 -> toBF i
+    Q4 -> neg i
   | asSeason s == asSeason s' = i -!- j         -- そうでなく季節が同じなら変数間制約
   | otherwise = toBF True                       -- 季節が違う場合は無視
   where
     i = head $ quarterVars `over` s
     j = head $ quarterVars `over` s'
 
-shareSlot :: (LectureHour d1, LectureHour d2) => Subject -> d1 -> d2 -> Bool
-shareSlot sub (asSlot -> s1) (asSlot -> s2) =
-  case isLong sub of
-    Nothing -> s1 == s2
+shareSlot :: (LectureHour d1, LectureHour d2) => (Subject, d1) -> (Subject, d2) -> Bool
+shareSlot (sub1, (asSlot -> s1)) (sub2, (asSlot -> s2)) =
+  case isLong sub1 of
+    Nothing ->
+      case isLong sub2 of
+        Nothing -> s1 == s2
+        Just 2  -> s1 == s2 || Just s1 == succSlot s2
+        Just 3  -> s1 == s2 || Just s1 == (succSlot s2) || Just s1 == (succSlot =<< succSlot s2)
     Just 2  -> s1 == s2 || Just s2 == succSlot s1
     Just 3  -> s1 == s2 || Just s2 == (succSlot s1) || Just s2 == (succSlot =<< succSlot s1)
