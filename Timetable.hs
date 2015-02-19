@@ -93,11 +93,11 @@ cond5 ss = (-&&&-) [ sub <!> sub'
 
 -- | nコマの科目は次の連続する(n-1)コマが存在するコマでなければならない
 cond6 ss = (-&&&-) [ neg s
-                   | sub <- filter ((Nothing /=) . isLong) subs
+                   | sub <- filter ((1 <) . isLong) subs
                    , s <- slotVars `over` sub
                    , case isLong sub of
-                     Just 2 -> succSlot (asSlot (sub, s)) == Nothing
-                     Just 3 -> (succSlot =<< succSlot (asSlot (sub, s))) == Nothing
+                     2 -> succSlot (asSlot (sub, s)) == Nothing
+                     3 -> (succSlot =<< succSlot (asSlot (sub, s))) == Nothing
                      _ -> False
                    ]
   where
@@ -105,7 +105,7 @@ cond6 ss = (-&&&-) [ neg s
 
 -- | nコマの科目はそれらのコマにも同学年の他の科目が入ってはいけない
 cond7 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
-                   | sub <- filter ((Nothing /=) . isLong) subs
+                   | sub <- filter ((1 <) . isLong) subs
                    , q <- quarterVars `over` sub
                    , s <- slotVars `over` sub
                    , sub' <- subs
@@ -117,7 +117,7 @@ cond7 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg (s' `on` sub')
                    ]
            -&-
            (-&&&-) [ anotherQuarterBool sub sub' -|- neg s'
-                   | sub <- filter ((Nothing /=) . isLong) fixed
+                   | sub <- filter ((1 <) . isLong) fixed
                    , let (Right e) = subjectNumber sub
                    , sub' <- subs
                    , asYear e == asYear sub'
@@ -329,9 +329,9 @@ toLatex dataName table h = do
   where
     follwingCell (y, q, s@(Slot d h))
       | elem (asHour s) [H1, H3] = False
-      | Just (_, sub) <- find ((k' ==) . fst) table = Nothing /= isLong sub && atComputerRoom sub
+      | Just (_, sub) <- find ((k' ==) . fst) table = 1 < isLong sub && atComputerRoom sub
       | elem (asHour s) [H2, H4] = False
-      | Just (_, sub) <- find ((k'' ==) . fst) table = Just 3 == isLong sub  && atComputerRoom sub
+      | Just (_, sub) <- find ((k'' ==) . fst) table = 2 < isLong sub  && atComputerRoom sub
       | otherwise = False
       where
         k' = (y, q, Slot d (pred h))

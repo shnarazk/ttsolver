@@ -111,7 +111,7 @@ data Subject = Subject
                , target :: Target  -- ^ 開講時期
                , required :: Bool  -- ^ 必修/選択
                , lecturersOf :: [String] -- ^ 担当教員群
-               , isLong :: Maybe Int     -- ^ 連続コマの有無
+               , isLong :: Int     	-- ^ 連続コマ数
                , preqsOf :: [String]     -- ^ 履修条件
                , sameWith :: [String]    -- ^ 同時開講科目
                , atComputerRoom :: Bool    -- ^ 演習室使用
@@ -214,8 +214,7 @@ isFixed (subjectNumber -> Right _) = True
 
 type TimeTable = [(Entry, Subject)]
 
-data Sub
-  = Sub String Target Bool [String] (Maybe Int) [String] [String] Bool
+data Sub = Sub String Target Bool [String] Int [String] [String] Bool
 
 canonize :: [Sub] -> [Subject]
 canonize = renumber . concatMap unfoldSubject
@@ -344,10 +343,10 @@ anotherQuarterBool s s'
 shareSlot :: (LectureHour d1, LectureHour d2) => (Subject, d1) -> (Subject, d2) -> Bool
 shareSlot (sub1, (asSlot -> s1)) (sub2, (asSlot -> s2)) =
   case isLong sub1 of
-    Nothing ->
+    1 ->
       case isLong sub2 of
-        Nothing -> s1 == s2
-        Just 2  -> s1 == s2 || Just s1 == succSlot s2
-        Just 3  -> s1 == s2 || Just s1 == (succSlot s2) || Just s1 == (succSlot =<< succSlot s2)
-    Just 2  -> s1 == s2 || Just s2 == succSlot s1
-    Just 3  -> s1 == s2 || Just s2 == (succSlot s1) || Just s2 == (succSlot =<< succSlot s1)
+        1 -> s1 == s2
+        2  -> s1 == s2 || Just s1 == succSlot s2
+        3  -> s1 == s2 || Just s1 == (succSlot s2) || Just s1 == (succSlot =<< succSlot s2)
+    2  -> s1 == s2 || Just s2 == succSlot s1
+    3  -> s1 == s2 || Just s2 == (succSlot s1) || Just s2 == (succSlot =<< succSlot s1)
