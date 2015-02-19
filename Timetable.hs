@@ -180,18 +180,11 @@ cond10 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
     subs  = filter (not . isFixed) ss
     fixed = filter isFixed ss
 
--- | 第2学年は月火がだめ、第4学年は月、第2Qがだめ
+-- | 第2学年は月火がだめ、第2Qがだめ
 cond11 ss = (-&&&-) [ neg s
                     | sub <- filter ((Y2 ==) . asYear) subs
                     , s <- slotVars `over` sub
                     , elem (asDoW (sub, s)) [Mon, Tue]
-                    ]
-            -&-
-            (-&&&-) [ neg s -&- neg q
-                    | sub <- filter ((Y4 ==) . asYear) subs
-                    , q <- quarterVars `over` sub
-                    , s <- slotVars `over` sub
-                    , elem (asDoW (sub, s)) [Mon]
                     ]
             -&-
             (-&&&-) [ neg q
