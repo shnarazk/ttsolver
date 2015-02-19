@@ -214,7 +214,7 @@ isFixed (subjectNumber -> Right _) = True
 
 type TimeTable = [(Entry, Subject)]
 
-data Sub = Sub String Target Bool [String] Int [String] [String] Bool
+data Sub = Sub String Target Bool Int [String] [String] Bool [String]
 
 canonize :: [Sub] -> [Subject]
 canonize = renumber . concatMap unfoldSubject
@@ -226,11 +226,11 @@ renumber l = loop l 1
     loop (sub@(isFixed -> True):l)  n = sub                            : loop l n
     loop (sub@(isFixed -> False):l) n = sub { subjectNumber = Left n } : loop l (n + 1)
 
-unfoldSubject sub@(Sub la (F y q d h) re ls is pr sa at)
+unfoldSubject sub@(Sub la (F y q d h) re is pr sa at ls)
   = [Subject la (TargetFixed e) re ls is pr sa at (Right e)]
   where
     e = (y, q, Slot d h)
-unfoldSubject sub@(Sub la (Q y q) re ls is pr sa at)
+unfoldSubject sub@(Sub la (Q y q) re is pr sa at ls)
   -- 科目名が'で終わると同時開講
   | lc == '\''  = [Subject namep ta re ls is pr sa at z, Subject nameq ta re ls is pr [namep] at z]
   -- 科目名が*で終わると2クォーター開講
@@ -247,7 +247,7 @@ unfoldSubject sub@(Sub la (Q y q) re ls is pr sa at)
       nameq = init la ++ "''"
       name = init la
       lc = last la
-unfoldSubject sub@(Sub la (S y s) re ls is pr sa at)
+unfoldSubject sub@(Sub la (S y s) re is pr sa at ls)
   -- 科目名が'で終わると同時開講
   | lc == '\''  = [Subject namep ta re ls is pr sa at z, Subject nameq ta re ls is pr [namep] at z]
   -- 科目名が*で終わると2クォーター開講
