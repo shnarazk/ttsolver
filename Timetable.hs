@@ -196,9 +196,9 @@ cond11 ss = (-&&&-) [ neg s
 
 -- | 3,4年の講義に関しては講師は1日に2つ講義を持たない
 cond12 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
-                   | sub <- filter ((Y2 <=) . asYear) subs
+                   | sub <- filter ((Y1 <=) . asYear) subs
                    , lecturer <- lecturersOf sub
-                   , sub' <- filter ((Y2 <=) . asYear) subs
+                   , sub' <- filter ((Y1 <=) . asYear) subs
                    , sub < sub'
                    , elem lecturer (lecturersOf sub')
                    , q <- quarterVars `over` sub
@@ -206,7 +206,19 @@ cond12 ss = (-&&&-) [ (q -!- (q `on` sub')) -|- neg s -|- neg s'
                    , s' <- slotVars `over` sub'
                    , asDoW (sub, s) == asDoW (sub', s')
                    ]
+            -&-
+            (-&&&-) [ anotherQuarterBool sub sub' -|- neg s
+                   | sub <- filter ((Y1 <=) . asYear) subs
+                   , lecturer <- lecturersOf sub
+                   , sub' <- filter ((Y1 <=) . asYear) fixed
+                   , sub < sub'
+                   , elem lecturer (lecturersOf sub')
+                   , s <- slotVars `over` sub
+                   , let (Right (_, _, s')) = subjectNumber sub'
+                   , asDoW (sub, s) == asDoW s'
+                   ]
   where
+    fixed  = filter isFixed ss
     subs  = filter (not . isFixed) ss
 
 -- | 第3学年DQ2に必修はいれない
