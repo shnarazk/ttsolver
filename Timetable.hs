@@ -268,11 +268,8 @@ runSolver dataName mkrule subjects = do
   let (r1, r2) = (mkrule subjectsInSpring, mkrule subjectsInAutomn)
   let
     assignTable :: [Subject] -> [Int] -> TimeTable
-    assignTable subs ans = table
-      where
-        x = filter (0 <) . (take (length subs * bitsForSubject)) $ ans
-        -- comp (p1, s1) (p2, s2) = case compare (target s1) (target s2) of { EQ -> compare p1 p2; x -> x }
-        table = sort {- By comp -} $ map (\s -> (asEntry (s, x), s)) subs
+    assignTable subs ans = sort $ map (\s -> (asEntry (s, x), s)) subs
+      where x = filter (0 <) . (take (length subs * bitsForSubject)) $ ans
   let
     printer :: [Subject] -> [Int] -> IO ()
     printer subs ans = do
@@ -283,12 +280,9 @@ runSolver dataName mkrule subjects = do
               putStr $ printf "%s%s: %-24s" (show (asQuarter e)) (show (asSlot e)) (labelOf s)
               putStrLn . ("\t" ++) . intercalate ", " $ lecturersOf s
   case os of
-    ("-i":_) | elem "B" os -> do
-      printer subjectsInAutomn . read =<< getContents
-    ("-i":_) -> do
-      printer subjectsInSpring . read =<< getContents
-    ("-d":_) -> do
-      putStrLn . asCNFString $ if elem "B" os then r2 else r1
+    ("-i":_) | elem "B" os -> do printer subjectsInAutomn . read =<< getContents
+    ("-i":_) -> do printer subjectsInSpring . read =<< getContents
+    ("-d":_) -> do putStrLn . asCNFString $ if elem "B" os then r2 else r1
     _ -> do
       case map (SAT.satisfiable (:) . asList) [r1, r2] of
         [[], _] -> putStrLn "can't solve Spring constraints"
