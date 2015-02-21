@@ -15,6 +15,7 @@ module Timetable.Types
        , Quarter (..)
        , DoW (..)
        , Hour (..)
+       , Entry (..)
        , Target (..)
        , Slot (..)
        , quarterVars

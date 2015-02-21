@@ -299,6 +299,7 @@ runSolver dataName mkrule subjects = do
           -- toLatexTable p table
           withFile "timetable-assign.tex" WriteMode $ toLatex dataName table
           dumpReport table      -- summary report
+          withFile "timetable.csv" WriteMode $ toCSV table
 
 toLatex :: String -> TimeTable -> Handle -> IO ()
 toLatex dataName table h = do
@@ -392,3 +393,58 @@ dumpReport table = do
   where
     lects = sort . nub . concatMap (lecturersOf . snd) $ table
     gather key = filter (elem key . lecturersOf . snd) $ table
+
+toCSV :: TimeTable -> Handle -> IO ()
+toCSV table h = do
+  forM_ (sort table) $ \(e,s) -> do
+    case makeTL table s e of
+      Nothing -> return ()
+      Just (name, tt) -> do
+        -- 科目名
+        hPutStr h $ name
+        hPutStr h ","
+        -- 単位数
+        hPutStr h $ show $ numUnits s
+        hPutStr h ","
+        -- 必・選
+        hPutStr h $ if required s then "必修" else "選択"
+        hPutStr h ","
+        -- 標準履修年次
+        hPutStr h $ show $ fromEnum (asYear s) + 1
+        hPutStr h ","
+        -- 講義
+        hPutStr h $ if not ("演習" `isInfixOf` labelOf s) && not ("実験" `isInfixOf` labelOf s) then "○" else ""
+        hPutStr h ","
+        -- 演習
+        hPutStr h $ if "演習" `isInfixOf` labelOf s then "○" else ""
+        hPutStr h ","
+        -- 実験
+        hPutStr h $ if "実験" `isInfixOf` labelOf s then "○" else ""
+        hPutStr h ","
+        -- 時間数
+        hPutStr h $ tt
+        hPutStr h ","
+        -- 工業教員免許
+        hPutStr h ","
+        -- 理科教員免許
+        hPutStr h ","
+        -- 数学教員免許
+        hPutStrLn h ""
+    
+makeTL :: TimeTable -> Subject -> Entry -> Maybe (String, String)
+makeTL table sub e
+  | "''" `isInfixOf` (labelOf sub) = Nothing
+  | "→" `isPrefixOf` (labelOf sub) = Nothing
+  | "→" `isSuffixOf` (labelOf sub) = Just (init name, tt 1 [(asYear e, asQuarter e), (asYear e, succ (asQuarter e))])
+  | "'" `isSuffixOf` (labelOf sub) = Just (init name, tt 2 [(asYear e, asQuarter e)])
+  | otherwise = Just (name, tt 1 [(asYear e, asQuarter e)])
+  where
+    name = labelOf sub
+    tt :: Int -> [(Year, Quarter)] -> String
+    tt n qs = concatMap (\q -> if elem q qs then show n ++ "," else ",") [(y, q) | y <- [Y1 .. Y4], q <- [Q1 .. Q4]]
+
+numUnits :: Subject -> Int
+numUnits sub
+  | "→" `isSuffixOf` (labelOf sub) = 2
+  | "'" `isSuffixOf` (labelOf sub) = 2
+  | otherwise = 1
