@@ -14,6 +14,7 @@ module Timetable
 import Control.Applicative
 import Control.Monad
 import Data.List
+import Data.Ord
 import Data.Time
 import System.Environment
 import System.IO
@@ -186,7 +187,7 @@ dumpReport table = do
 
 toCSV :: TimeTable -> Handle -> IO ()
 toCSV table h = do
-  forM_ (sort table) $ \(e,s) -> do
+  forM_ (sortBy (comparing (csvOrder . snd)) table) $ \(e,s) -> do
     case makeTL table s e of
       Nothing -> return ()
       Just (name, tt) -> do
