@@ -191,6 +191,9 @@ toCSV table h = do
     case makeTL table s e of
       Nothing -> return ()
       Just (name, tt) -> do
+        -- 科目順序
+        hPutStr h $ show $ (csvOrder s)
+        hPutStr h ","
         -- 科目名
         hPutStr h $ name
         hPutStr h ","
