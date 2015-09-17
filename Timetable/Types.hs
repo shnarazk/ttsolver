@@ -154,14 +154,14 @@ class LectureDate a where
 
 instance LectureDate Season where
   asSeason  = id
-  asQuarter = error "can't cast to `Quarter` from `Season`"
+  asQuarter = error "can't cast to `Quarter` from `Season` due to lack of information"
 
 instance LectureDate Quarter where
   asSeason Q1	= Spring
   asSeason Q2	= Spring
   asSeason Q3	= Autumn
   asSeason Q4	= Autumn
-  asQuarter 	= error "can't cast to `Quarter` from `Season`"
+  asQuarter 	= error "can't cast to `Quarter` from `Season` due to lack of information"
 
 instance LectureDate Entry where
   asSeason (_, q, _) = asSeason q
@@ -181,9 +181,7 @@ instance LectureDate Subject where
 
 instance LectureDate (Subject, Int) where
   asSeason = asSeason . fst
-  asQuarter (s, i) = error "our coding system can't hold the quater information"
---    | asSeason s == Spring = toEnum $ indexFromVar i
---    | asSeason s == Autumn = toEnum $ 2 + indexFromVar i
+  asQuarter = asQuarter . fst
 
 class LectureHour a where
   asSlot :: a -> Slot
@@ -216,6 +214,7 @@ isFixed (subjectNumber -> Right _) = True
 
 type TimeTable = [(Entry, Subject)]
 
+-- 科目名 開講時期 必須 連続開講時間数 前提科目群 同時開講科目群 演習室使用 担当教員群 順序
 data Sub = Sub String Target Bool Int [String] [String] Bool [String] Double
 
 canonize :: [Sub] -> [Subject]
